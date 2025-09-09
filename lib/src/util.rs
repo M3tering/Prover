@@ -7,22 +7,16 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 pub fn validate_signature(
     message_hash: &str,
-    public_key: &str,
     signature_str: &str,
+    verifying_key: VerifyingKey,
 ) -> Option<bool> {
-    println!(
-        "Validating signature for message: {}, public key: {}, signature: {}",
-        message_hash, public_key, signature_str
-    );
     // Decode the signature and public key using ed25519-dalek
     let signature = build_signature(signature_str)?;
-    let verify_key = build_verifying_key(public_key)?;
-
     // Verify the signature using ed25519-dalek
-    match verify_key.verify(&hex::decode(message_hash).unwrap(), &signature) {
+    match verifying_key.verify(&hex::decode(message_hash).unwrap(), &signature) {
         Ok(()) => Some(true),
         Err(err) => {
-            println!("Signature verification failed for public key: {} with err {:?}", public_key, err);
+            println!("Signature verification failed with err {:?}", err);
             None
         }
     }
@@ -39,7 +33,7 @@ fn build_signature(raw_signature: &str) -> Option<Signature> {
     }
 }
 
-fn build_verifying_key(raw_public_key: &str) -> Option<VerifyingKey> {
+pub fn build_verifying_key(raw_public_key: &str) -> Option<VerifyingKey> {
     let key = B256::from_str(raw_public_key.strip_prefix("0x").unwrap()).unwrap();
     let verifying_key = VerifyingKey::from_bytes(&key);
     match verifying_key {
@@ -86,9 +80,24 @@ pub fn destructure_payload(payload: &str) -> (&str, &str, u64, u64) {
 }
 
 pub fn extract_nonce(payload: &str) -> i64 {
+    println!("payload {}", payload);
     let payload_bytes = hex::decode(payload).expect("Failed to decode hex payload");
     let nonce_bytes: [u8; 4] = payload_bytes[0..4].try_into().expect("Failed to get nonce bytes");
     i32::from_be_bytes(nonce_bytes) as i64
+}
+
+pub fn trim_zeros(value: Vec<u8>) -> Vec<u8> {
+    let mut value = value;
+    if value.is_empty() { return value; }
+    loop {
+        let mut buf = [0u8; 8];
+        let data: [u8; 6] = value[(value.len() - 6)..].try_into().unwrap();
+        buf[2..].copy_from_slice(&data); // pad the first 2 bytes with zeros
+        if u64::from_be_bytes(buf) == 0u64 { 
+            value = value.strip_suffix(&[0u8; 6]).unwrap().to_vec();
+        } else { break; }
+    }
+    value
 }
 
 pub fn to_b256(value: U256) -> B256 {

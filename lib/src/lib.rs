@@ -3,14 +3,18 @@ use std::{collections::HashMap, fmt::Debug};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_sol_types::sol;
 use alloy_trie::Nibbles;
+use ed25519_dalek::VerifyingKey;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+
 
 mod util;
 use util::validate_signature;
 
 pub use util::{
-    calc_slot_key, destructure_payload, get_state_root, to_b256, to_keccak_hash,
-    verify_account_proof, extract_nonce, to_u256
+    calc_slot_key, destructure_payload, extract_nonce, get_state_root, to_b256, to_keccak_hash,
+    to_u256, trim_zeros, verify_account_proof,
 };
 
 sol! {
@@ -99,13 +103,13 @@ pub struct Payload {
 pub struct M3terRawPayload(String);
 
 impl M3terRawPayload {
-    pub fn to_m3ter_payloads(&self) -> M3terPayload {
+    pub fn to_m3ter_payload(&self) -> M3terPayload {
         let (message, signature, nonce, energy) = util::destructure_payload(&self.0);
         M3terPayload::new(message.to_string(), signature.to_string(), nonce, energy)
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct M3terPayload {
     message: String,
     signature: String,
@@ -124,6 +128,7 @@ impl M3terPayload {
     }
 
     fn _msg_to_vec(&self) -> Vec<u8> {
+        
         hex::decode(self.message.clone()).expect("Failed to decode hex")
     }
 }
@@ -142,8 +147,8 @@ impl M3ter {
         }
     }
 
-    fn validate_payload(&self, payload: &M3terPayload) -> bool {
-        match validate_signature(&payload.message, &self.public_key, &payload.signature) {
+    fn validate_payload(&self, payload: &M3terPayload, verifying_key: VerifyingKey) -> bool {
+        match validate_signature(&payload.message, &payload.signature, verifying_key) {
             Some(is_valid) => is_valid,
             None => {
                 println!("Invalid signature for payload: {:?}", payload);
@@ -184,7 +189,6 @@ pub fn track_energy(
     m3ter: M3ter,
     m3ter_payloads: &[M3terPayload],
     start_nonce: u64,
-    is_balance_zero: bool,
     (storage_hash, proof): (&B256, &Vec<Bytes>),
 ) -> (u64, u64) {
     if !m3ter.verify_public_key(storage_hash, proof) {
@@ -195,27 +199,52 @@ pub fn track_energy(
         return (0, start_nonce);
     }
 
-    let mut energy_sum = 0;
-    let mut latest_nonce = start_nonce;
-    let mut is_balance_zero = is_balance_zero;
-    for payload in m3ter_payloads.iter() {
-        // let payload = payload.to_m3ter_payloads();
-        if (latest_nonce == 0 && !is_balance_zero) && latest_nonce + 1 != payload.nonce {
-            println!(
-                "Invalid nonce: {} < {} for m3ter_id {}",
-                &payload.nonce, &latest_nonce, &m3ter.m3ter_id
-            );
-            break; // Nonce is not sequential or is less than the latest nonce
-        }
-        if !m3ter.validate_payload(payload) {
-            println!("Invalid payload: {:?}", payload);
-            break;
-        }
-        energy_sum += payload.energy;
-        latest_nonce = payload.nonce;
-        is_balance_zero = energy_sum == 0;
-        println!("State: energy {:?}, nonce {:?}", energy_sum, latest_nonce);
-    }
+    let verifying_key = util::build_verifying_key(&m3ter.public_key).unwrap();
 
-    (energy_sum, latest_nonce)
+    // let mut energy_sum = 0;
+    // let mut latest_nonce = start_nonce;
+    m3ter_payloads
+        .par_iter()
+        .fold(
+            || (0, start_nonce),
+            |(energy, nonce), payload| {
+                if nonce != start_nonce && nonce + 1 != payload.nonce {
+                    println!(
+                        "Invalid nonce: {} < {} for m3ter_id {}",
+                        &payload.nonce, &nonce, &m3ter.m3ter_id
+                    );
+                    return (energy, nonce); // Nonce is not sequential or is less than the latest nonce
+                }
+                if !m3ter.validate_payload(payload, verifying_key) {
+                    println!("Invalid payload: {:?}", payload);
+                    return (energy, nonce);
+                };
+                let energy_sum = energy + payload.energy;
+                println!("State: energy {:?}, nonce {:?}", payload.energy, payload.nonce);
+                (energy_sum, payload.nonce)
+            },
+        )
+        .reduce( 
+            || (0, 0),
+            |a, b| { println!("Reducing: {:?} + {:?}", a.0, b.0); (a.0 + b.0, if a.1 > b.1 { a.1 } else { b.1 })},
+        )
+    // for payload in m3ter_payloads.iter() {
+    //     // let payload = payload.to_m3ter_payloads();
+    //     if latest_nonce != start_nonce && latest_nonce + 1 != payload.nonce {
+    //         println!(
+    //             "Invalid nonce: {} < {} for m3ter_id {}",
+    //             &payload.nonce, &latest_nonce, &m3ter.m3ter_id
+    //         );
+    //         break; // Nonce is not sequential or is less than the latest nonce
+    //     }
+    //     if !m3ter.validate_payload(payload) {
+    //         println!("Invalid payload: {:?}", payload);
+    //         break;
+    //     }
+    //     energy_sum += payload.energy;
+    //     latest_nonce = payload.nonce;
+    //     println!("State: energy {:?}, nonce {:?}", energy_sum, latest_nonce);
+    // }
+
+    // (energy_sum, latest_nonce)
 }

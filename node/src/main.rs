@@ -24,8 +24,7 @@ use energy_tracker_verifier::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sp1_sdk::{
-    HashableKey, Prover, ProverClient, SP1ProofWithPublicValues, SP1Stdin, SP1VerifyingKey,
-    include_elf,
+    include_elf, network::FulfillmentStrategy, HashableKey, Prover, ProverClient, SP1ProofWithPublicValues, SP1Stdin, SP1VerifyingKey
 };
 
 /// The ELF (executable and linkable format) file for the Succinct RISC-V zkVM.
@@ -94,8 +93,36 @@ async fn main() {
     // Define a simple route
     println!("connecting to database...");
     let db_pool = establish_db_connection();
-    let db_state = Arc::new(db_pool);
+    let db_state = Arc::new(db_pool.clone());
     println!("connected to database");
+
+    // tokio::spawn(async move {
+    //     let mut interval = time::interval(Duration::from_secs(60 * 50));
+    //     loop {
+    //         interval.tick().await;
+    //         match db_pool.get() {
+    //             Ok(mut _conn) => {
+    //                 #[derive(Deserialize, Debug)]
+    //                 struct SamplePayload(
+    //                     #[serde(deserialize_with = "deserialize_payload")]
+    //                     HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
+    //                 );
+    //                 // Setup the inputs.
+    //                 // let file = File::open("/home/godwin/energy-tracker/node/src/samples.json").await.unwrap();
+    //                 let mut file = File::create("src/foo.txt").await.unwrap();
+    //                 file.write_all(b"hello, world!").await.unwrap();
+    //                 // let reader = BufReader::new(file);
+    //                 // let payloads: SamplePayload = serde_json::from_reader(reader.buffer()).unwrap();
+
+    //                 // let _ = execute_prover(payloads.0).await;
+    //                 break;
+    //             }
+    //             Err(e) => {
+    //                 println!("encountered error {:?}", e);
+    //             }
+    //         }
+    //     }
+    // });
 
     let app = Router::new()
         .route("/", get(root))
@@ -114,9 +141,8 @@ async fn main() {
 }
 
 fn establish_db_connection() -> DbPool {
-    let manager = ConnectionManager::<PgConnection>::new(
-        "postgres://aquinas:aquinas@localhost:5432/m3tering-db",
-    );
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL not set in .env");
+    let manager = ConnectionManager::<PgConnection>::new(&database_url);
     r2d2::Pool::builder()
         .build(manager)
         .expect("Failed to create pool.")
@@ -157,7 +183,7 @@ async fn payload_handler(
         signature: signature.to_string(),
         nonce: nonce as i64,
         energy: energy as i64,
-        is_verified: false
+        is_verified: false,
     };
     println!("Inserting payload");
     let inserted: M3terPayload = diesel::insert_into(m3ter_payloads::table)
@@ -172,7 +198,7 @@ async fn payload_handler(
 async fn batch_payload_handler(
     State(db_state): State<Arc<DbPool>>,
     Json(payloads): Json<Vec<M3terPayloadInbound>>,
-) -> Json<serde_json::Value> {
+) -> (StatusCode, Json<serde_json::Value>) {
     let mut connection = db_state.get().unwrap();
     let received_count = payloads.len();
 
@@ -190,7 +216,7 @@ async fn batch_payload_handler(
                 signature: signature.to_string(),
                 nonce: nonce as i64,
                 energy: energy as i64,
-                is_verified: false
+                is_verified: false,
             }
         })
         .collect::<Vec<NewM3terPayload>>();
@@ -202,15 +228,18 @@ async fn batch_payload_handler(
         .expect("Failed to insert payload");
 
     println!("Inserted payload: {:?}", inserted);
-    Json(
-        json!({ "inserted": inserted, "nonces_inserted": inserted.len(), "nonces_repeated": received_count - inserted.len() }),
+    (
+        StatusCode::OK,
+        Json(
+            json!({ "inserted": inserted, "nonces_inserted": inserted.len(), "nonces_repeated": received_count - inserted.len() }),
+        ),
     )
 }
 
 async fn run_prover_handler(
     State(db_state): State<Arc<DbPool>>,
     Query(params): Query<HashMap<String, String>>,
-) -> Json<serde_json::Value> {
+) -> (StatusCode, Json<serde_json::Value>) {
     let proof_type = params
         .get("proof_type")
         .map(|s| {
@@ -222,15 +251,22 @@ async fn run_prover_handler(
         })
         .unwrap_or("groth16");
 
-    let mut connection = db_state.get().unwrap();
-    let provider = get_provider().await.expect("Failed to get provider");
+    let mut conn = match db_state.get() {
+        Ok(state) => state,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": true, "message": format!("encountered error {:?}", e) })),
+            );
+        }
+    };
     let proving_payload = sql_query(
         "SELECT *
         FROM m3ter_payloads
-        WHERE is_verified = FALSE 
-        ORDER BY m3ter_id, nonce ASC",
+        WHERE is_verified = FALSE
+        LIMIT 100",
     )
-    .load::<M3terPayload>(&mut connection)
+    .load::<M3terPayload>(&mut conn)
     .expect("Failed to load payloads");
 
     let mut grouped: HashMap<String, Vec<energy_tracker_lib::M3terPayload>> = HashMap::new();
@@ -246,10 +282,123 @@ async fn run_prover_handler(
             ));
     }
 
+    let (proof_fixture, hash) = run_prover(grouped, proof_type).await;
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "code": 200,
+            "success": true,
+            "proof": proof_fixture,
+            "tx_hash": hash,
+        })),
+    )
+}
+
+// async fn execute_prover_handler(
+//     State(_db_state): State<Arc<DbPool>>,
+//     Json(_payload): Json<M3terPayloadInbound>,
+// ) -> (StatusCode, Json<serde_json::Value>) {
+//     #[derive(Deserialize, Debug)]
+//     struct SamplePayload(
+//         #[serde(deserialize_with = "deserialize_payload")]
+//         HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
+//     );
+//     // Setup the inputs.
+//     let file = File::open("/home/godwin/energy-tracker/node/src/samples.json")
+//         .await
+//         .unwrap();
+
+//     let reader = BufReader::new(file);
+//     let payloads: SamplePayload = serde_json::from_reader(reader.buffer()).unwrap();
+
+//     // let _ = execute_prover(payloads.0).await;
+//     let (payload, _) = build_proving_payload(payloads.0).await;
+
+//     let mut stdin = SP1Stdin::new();
+//     let _private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
+//     let _rpc_url = env::var("NETWORK_RPC_URL").expect("RPC_URL not set in .env");
+//     stdin.write(&payload);
+//     let prover_client = ProverClient::builder()
+//         // .network()
+//         // .private_key(&private_key)
+//         // .rpc_url(&rpc_url)
+//         .cpu()
+//         .build();
+//     let (output, report) = prover_client
+//         .execute(ENERGY_TRACKER_ELF, &stdin)
+//         .run()
+//         .unwrap();
+//     println!("output {:?} and report {:?}", output, report);
+//     (
+//         StatusCode::OK,
+//         Json(json!({
+//             "code": 200,
+//             "success": true
+//         })),
+//     )
+// }
+
+async fn get_prover_vkey() -> Json<serde_json::Value> {
+    let prover = ProverClient::builder().cpu().build();
+    let (_, vk) = prover.setup(ENERGY_TRACKER_ELF);
+    Json(json!({
+        "vkey": vk.bytes32()
+    }))
+}
+
+async fn run_prover(
+    payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
+    proof_type: &str,
+) -> (ProofFixture, String) {
+    let (payload, anchor_block) = build_proving_payload(payload).await;
+
+    let mut stdin = SP1Stdin::new();
+    let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
+    let rpc_url = env::var("NETWORK_RPC_URL").expect("RPC_URL not set in .env");
+    stdin.write(&payload);
+    let prover_client = ProverClient::builder()
+        .network()
+        .private_key(&private_key)
+        .rpc_url(&rpc_url)
+        // .cpu()
+        // .cuda()
+        .build();
+
+    let (pk, vk) = prover_client.setup(ENERGY_TRACKER_ELF);
+
+    let proof = match proof_type {
+        "plonk" => prover_client.prove(&pk, &stdin).strategy(FulfillmentStrategy::Auction).plonk().run_async().await,
+        "groth16" => prover_client.prove(&pk, &stdin).strategy(FulfillmentStrategy::Auction).groth16().run_async().await,
+        _ => panic!("Unsupported proof type: {}", proof_type),
+    }
+    .expect("proof supposed to be generated");
+
+    let proof_fixture = create_proof_fixture(&proof, &vk);
+    println!("Proof generated successfully proof = {:?}", &proof_fixture);
+
+    println!("Committing state ...");
+    let hash = commit_state(
+        &get_provider().await.unwrap(),
+        anchor_block,
+        &proof_fixture.new_balances,
+        &proof_fixture.new_nonces,
+        &proof_fixture.proof,
+    )
+    .await
+    .expect("msg: Failed to commit state");
+
+    (proof_fixture, hash.to_string())
+}
+
+async fn build_proving_payload(
+    payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
+) -> (Payload, u64) {
+    let provider = get_provider().await.expect("Failed to get provider");
     let previous_nonces = get_previous_values(&provider, U256::from(1)).await.unwrap();
     let previous_balances = get_previous_values(&provider, U256::from(0)).await.unwrap();
 
-    let slot_keys = grouped
+    let slot_keys = payload
         .keys()
         .map(|key| {
             let m3ter_id: u64 = key.parse().expect("meter id not valid");
@@ -261,83 +410,33 @@ async fn run_prover_handler(
 
     let (account_proof, encoded_account, storage_hash, proofs, anchor_block) =
         get_storage_proofs(&provider, slot_keys).await.unwrap();
-
-        println!("{:?}", proofs);
-
     let block_bytes = get_block_rpl_bytes(&provider, anchor_block).await.unwrap();
 
-    println!("Loaded payloads: {:?}", grouped);
+    println!("Loaded payloads: {:?}", payload);
     println!("Anchor Block: {}", anchor_block);
-    let payload = Payload {
-        mempool: grouped,
-        previous_nonces: previous_nonces.into(),
-        previous_balances: previous_balances.into(),
-        proofs: Some(ProofStruct {
-            account_proof,
-            encoded_account,
-            storage_hash,
-            proofs,
-        }),
-        block_bytes: Some(block_bytes),
-    };
-
-    let mut stdin = SP1Stdin::new();
-    let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
-    let rpc_url = env::var("NETWORK_RPC_URL").expect("RPC_URL not set in .env");
-    stdin.write(&payload);
-    let prover_client = ProverClient::builder()
-        // .network()
-        // .private_key(&private_key)
-        // .rpc_url(&rpc_url)
-        .cpu()
-        .build();
-
-    let (pk, vk) = prover_client.setup(ENERGY_TRACKER_ELF);
-
-    let proof = match proof_type {
-        "plonk" => prover_client.prove(&pk, &stdin).plonk().run(),
-        "groth16" => prover_client.prove(&pk, &stdin).groth16().run(),
-        _ => panic!("Unsupported proof type: {}", proof_type),
-    }
-    .expect("proof supposed to be generated");
-
-    let proof_fixture = create_proof_fixture(&proof, &vk);
-    println!("Proof generated successfully proof = {:?}", &proof_fixture);
-
-    println!("Committing state ...");
-    let hash = commit_state(
-        &provider,
+    (
+        Payload {
+            mempool: payload,
+            previous_nonces: previous_nonces.into(),
+            previous_balances: previous_balances.into(),
+            proofs: Some(ProofStruct {
+                account_proof,
+                encoded_account,
+                storage_hash,
+                proofs,
+            }),
+            block_bytes: Some(block_bytes),
+        },
         anchor_block,
-        &proof_fixture.new_balances,
-        &proof_fixture.new_nonces,
-        &proof_fixture.proof,
     )
-    .await
-    .expect("msg: Failed to commit state");
-
-    update_payload(&mut connection, proving_payload).await;
-    Json(json!({
-        "code": 200,
-        "success": true,
-        "proof": proof_fixture,
-        "tx_hash": hash,
-    }))
 }
 
-async fn get_prover_vkey() -> Json<serde_json::Value> {
-    let prover = ProverClient::builder().cpu().build();
-    let (_, vk) = prover.setup(ENERGY_TRACKER_ELF);
-    Json(json!({
-        "vkey": vk.bytes32()
-    }))
-}
-
-async fn update_payload(
+async fn _update_payload(
     connection: &mut PooledConnection<ConnectionManager<PgConnection>>,
-    payloads: Vec<M3terPayload>
+    payloads: Vec<M3terPayload>,
 ) {
-    use diesel::prelude::*;
     use self::m3ter_payloads::dsl::*;
+    use diesel::prelude::*;
 
     diesel::update(m3ter_payloads.filter(id.eq_any(payloads.iter().map(|p| p.id))))
         .set(is_verified.eq(true))

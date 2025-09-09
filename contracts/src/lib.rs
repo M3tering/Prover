@@ -17,7 +17,7 @@ pub struct Account {
 }
 
 fn get_rollup_address() -> Address {
-    "0x3e9C2Cec262bce1E4Fd1E1d61455b7388C2cb649"
+    "0x6E31632D6A7Af8d30766AA9E216c49F5AAb846c2"
         .parse()
         .expect("Invalid address")
 }
@@ -94,13 +94,13 @@ fn get_rollup_abi() -> JsonAbi {
 
 pub async fn get_provider() -> Result<impl Provider> {
     let rpc_url = std::env::var("RPC_URL")
-        .unwrap_or_else(|_| "https://eth-mainnet.alchemyapi.io/v2/YOUR_API_KEY".to_string());
+        .unwrap_or_else(|_| "https://eth-sepolia.g.alchemy.com/v2/URjQnzNCUHumxPFL8VDoFBmpX4uqL6X8".to_string());
     println!("Connecting to provider at: {}", rpc_url);
-    let private_key = std::env::var("PRIVATE_KEY").expect("private key should exist in env");
+    let private_key = "3b62b0fb8da4fc79eff9236c50527cd8bb9cd7c264f1c838b105d4570aa0491e";//std::env::var("PRIVATE_KEY").expect("private key should exist in env");
     let private_key = if private_key.starts_with("0x") {
         private_key.strip_prefix("0x").unwrap()
     } else {
-        private_key.as_str()
+        private_key
     };
     let signer = PrivateKeySigner::from_slice(
         &hex::decode(private_key).expect("Failed to decode private key"),
