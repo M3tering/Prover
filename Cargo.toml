@@ -1,6 +1,6 @@
 [workspace]
 members = ["lib", "program", "script", "contracts", "node"]
-default-members = ["script"]
+default-members = ["node"]
 resolver = "2"
 
 [workspace.dependencies]

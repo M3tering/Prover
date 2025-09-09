@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 
 use alloy::{
-    dyn_abi::DynSolValue, eips::BlockNumberOrTag, hex, json_abi::JsonAbi, primitives::{Address, Bytes, B256, U256}, providers::{Provider, ProviderBuilder}, signers::local::PrivateKeySigner
+    dyn_abi::DynSolValue,
+    hex, json_abi::JsonAbi,
+    primitives::{Address, Bytes, B256, U256},
+    providers::{Provider, ProviderBuilder},
+    signers::local::PrivateKeySigner,
 };
 
 use alloy_contract::Interface;
@@ -17,7 +21,7 @@ pub struct Account {
 }
 
 fn get_rollup_address() -> Address {
-    "0x6E31632D6A7Af8d30766AA9E216c49F5AAb846c2"
+    "0x7b054580aEA6B6cbdF30BbbE84777bae623F4d1e"
         .parse()
         .expect("Invalid address")
 }
@@ -60,12 +64,21 @@ fn get_rollup_abi() -> JsonAbi {
             "stateMutability": "view"
         },
         {
-            "inputs": [
+            "inputs": [],
+            "name": "anchorBlock",
+            "outputs": [
                 {
-                    "internalType": "uint256",
-                    "name": "anchorBlock",
-                    "type": "uint256"
-                },
+                    "internalType" :"bytes32",
+                    "name":"",
+                    "type":
+                    "bytes32"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
                 {
                     "internalType": "bytes",
                     "name": "accountBlob",
@@ -93,10 +106,11 @@ fn get_rollup_abi() -> JsonAbi {
 }
 
 pub async fn get_provider() -> Result<impl Provider> {
-    let rpc_url = std::env::var("RPC_URL")
-        .unwrap_or_else(|_| "https://eth-sepolia.g.alchemy.com/v2/URjQnzNCUHumxPFL8VDoFBmpX4uqL6X8".to_string());
+    let rpc_url = std::env::var("RPC_URL").unwrap_or_else(|_| {
+        "https://eth-sepolia.g.alchemy.com/v2/URjQnzNCUHumxPFL8VDoFBmpX4uqL6X8".to_string()
+    });
     println!("Connecting to provider at: {}", rpc_url);
-    let private_key = "3b62b0fb8da4fc79eff9236c50527cd8bb9cd7c264f1c838b105d4570aa0491e";//std::env::var("PRIVATE_KEY").expect("private key should exist in env");
+    let private_key = "3b62b0fb8da4fc79eff9236c50527cd8bb9cd7c264f1c838b105d4570aa0491e"; //std::env::var("PRIVATE_KEY").expect("private key should exist in env");
     let private_key = if private_key.starts_with("0x") {
         private_key.strip_prefix("0x").unwrap()
     } else {
@@ -114,18 +128,37 @@ pub async fn get_provider() -> Result<impl Provider> {
     Ok(Box::new(provider))
 }
 
+pub async fn get_anchor_block_hash(provider: &impl Provider) -> Result<B256> {
+    let rollup_address = get_rollup_address();
+    let abi: JsonAbi = get_rollup_abi();
+    let interface = Interface::new(abi);
+    let contract = interface.connect(rollup_address, provider);
+
+    let get_anchor_block = contract.function("anchorBlock", &[])?;
+    let result = get_anchor_block.call().await?;
+
+    let anchor_hash = B256::from_slice(result[0].as_fixed_bytes().unwrap().0);
+    Ok(anchor_hash)
+}
+
 pub async fn get_storage_proofs(
     provider: &impl Provider,
     slots: Vec<B256>,
-) -> Result<(Vec<Bytes>, Vec<u8>, B256, HashMap<B256, (U256, Vec<Bytes>)>, u64)> {
-    let anchor_block = provider.get_block_number().await?;
+) -> Result<(
+    Vec<Bytes>,
+    Vec<u8>,
+    B256,
+    HashMap<B256, (U256, Vec<Bytes>)>,
+    B256,
+)> {
+    let anchor_block = get_anchor_block_hash(provider).await?;
 
     println!("slots {:?}", slots);
     let proof = provider.get_proof(get_m3ter_address(), slots);
 
     println!("geting storage_proofs at block = {:?}", anchor_block);
     let proof_at_block = proof
-        .number(anchor_block)
+        .hash(anchor_block)
         .await
         .map_err(|e| eyre::eyre!("Failed to get proof: {}", e))?;
 
@@ -144,7 +177,7 @@ pub async fn get_storage_proofs(
         storage_proofs
             .entry(proof.key.as_b256())
             .insert_entry((proof.value, proof.proof.clone()));
-    }   
+    }
 
     Ok((
         proof_at_block.account_proof,
@@ -155,9 +188,9 @@ pub async fn get_storage_proofs(
     ))
 }
 
-pub async fn get_block_rpl_bytes(provider: &impl Provider, block_number: u64) -> Result<Vec<u8>> {
+pub async fn get_block_rpl_bytes(provider: &impl Provider, block_hash: B256) -> Result<Vec<u8>> {
     let block = provider
-        .get_block_by_number(BlockNumberOrTag::Number(block_number))
+        .get_block_by_hash(block_hash)
         .await
         .map_err(|e| eyre::eyre!("Failed to get block: {}", e))?;
 
@@ -191,7 +224,6 @@ pub async fn get_previous_values(provider: &impl Provider, selector: U256) -> Re
 
 pub async fn commit_state(
     provider: &impl Provider,
-    anchor_block: u64,
     account_blob: &Bytes,
     nonce_blob: &Bytes,
     proof: &Bytes,
@@ -199,14 +231,11 @@ pub async fn commit_state(
     let rollup_address = get_rollup_address();
     let abi: JsonAbi = get_rollup_abi();
     let interface = Interface::new(abi);
-    let anchor_block: U256 = U256::from(anchor_block);
     let contract = interface.connect(rollup_address, provider);
 
-    println!("Committing state at block {}", anchor_block);
     let call_builder = contract.function(
         "commitState",
         &[
-            anchor_block.into(),
             DynSolValue::Bytes(account_blob.to_vec()),
             DynSolValue::Bytes(nonce_blob.to_vec()),
             DynSolValue::Bytes(proof.to_vec()),
@@ -214,7 +243,7 @@ pub async fn commit_state(
     )?;
 
     let pending_tx = call_builder.send().await?;
-        
+
     // Send the transaction
     // let pending_tx = provider.send_raw_transaction(&signed_tx.as_bytes()).await?;
     println!("Transaction sent with hash: {:?}", &pending_tx.tx_hash());

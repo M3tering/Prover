@@ -351,7 +351,7 @@ async fn run_prover(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
     proof_type: &str,
 ) -> (ProofFixture, String) {
-    let (payload, anchor_block) = build_proving_payload(payload).await;
+    let (payload, _) = build_proving_payload(payload).await;
 
     let mut stdin = SP1Stdin::new();
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
@@ -380,7 +380,6 @@ async fn run_prover(
     println!("Committing state ...");
     let hash = commit_state(
         &get_provider().await.unwrap(),
-        anchor_block,
         &proof_fixture.new_balances,
         &proof_fixture.new_nonces,
         &proof_fixture.proof,
@@ -393,7 +392,7 @@ async fn run_prover(
 
 async fn build_proving_payload(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
-) -> (Payload, u64) {
+) -> (Payload, B256) {
     let provider = get_provider().await.expect("Failed to get provider");
     let previous_nonces = get_previous_values(&provider, U256::from(1)).await.unwrap();
     let previous_balances = get_previous_values(&provider, U256::from(0)).await.unwrap();
@@ -413,7 +412,7 @@ async fn build_proving_payload(
     let block_bytes = get_block_rpl_bytes(&provider, anchor_block).await.unwrap();
 
     println!("Loaded payloads: {:?}", payload);
-    println!("Anchor Block: {}", anchor_block);
+    println!("Anchor Block: {:?}", anchor_block);
     (
         Payload {
             mempool: payload,
