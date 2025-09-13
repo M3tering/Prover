@@ -14,7 +14,7 @@ use util::validate_signature;
 
 pub use util::{
     calc_slot_key, destructure_payload, extract_nonce, get_state_root, to_b256, to_keccak_hash,
-    to_u256, trim_zeros, verify_account_proof,
+    to_u256, trim_zeros, verify_account_proof, decode_slice
 };
 
 sol! {

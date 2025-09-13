@@ -79,6 +79,13 @@ pub fn destructure_payload(payload: &str) -> (&str, &str, u64, u64) {
     (message, signature, nonce, energy)
 }
 
+pub fn decode_slice(data: &[u8; 6]) -> u64 {
+    // Convert 6 bytes to i64 (big-endian, pad with zeros)
+    let mut buf = [0u8; 8];
+    buf[2..].copy_from_slice(data); // pad the first 2 bytes with zeros
+    u64::from_be_bytes(buf)
+}
+
 pub fn extract_nonce(payload: &str) -> i64 {
     println!("payload {}", payload);
     let payload_bytes = hex::decode(payload).expect("Failed to decode hex payload");

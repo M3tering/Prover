@@ -16,7 +16,7 @@ use diesel::{
 };
 
 use energy_tracker_lib::{
-    Payload, ProofStruct, PublicValuesStruct, calc_slot_key, destructure_payload, extract_nonce,
+    calc_slot_key, decode_slice, destructure_payload, extract_nonce, Payload, ProofStruct, PublicValuesStruct
 };
 use energy_tracker_verifier::{
     commit_state, get_block_rpl_bytes, get_previous_values, get_provider, get_storage_proofs,
@@ -131,6 +131,7 @@ async fn main() {
         .route("/batch-payloads", post(batch_payload_handler))
         .route("/run_prover", get(run_prover_handler))
         .route("/vkey", get(get_prover_vkey))
+        .route("/update_verified_payloads", get(update_verified_payloads_handler))
         .with_state(db_state);
 
     println!("Starting server on http://localhost:8080");
@@ -282,8 +283,16 @@ async fn run_prover_handler(
             ));
     }
 
-    let (proof_fixture, hash) = run_prover(grouped, proof_type).await;
+    let (result, error) = run_prover(grouped, proof_type).await;
 
+    if let Some(err) = error {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            1Json(json!({ "error": true, "message": err })),
+        );
+    }
+
+    let (proof_fixture, hash) = result.unwrap();
     (
         StatusCode::OK,
         Json(json!({
@@ -308,13 +317,10 @@ async fn run_prover_handler(
 //     let file = File::open("/home/godwin/energy-tracker/node/src/samples.json")
 //         .await
 //         .unwrap();
-
 //     let reader = BufReader::new(file);
 //     let payloads: SamplePayload = serde_json::from_reader(reader.buffer()).unwrap();
-
 //     // let _ = execute_prover(payloads.0).await;
 //     let (payload, _) = build_proving_payload(payloads.0).await;
-
 //     let mut stdin = SP1Stdin::new();
 //     let _private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
 //     let _rpc_url = env::var("NETWORK_RPC_URL").expect("RPC_URL not set in .env");
@@ -347,11 +353,28 @@ async fn get_prover_vkey() -> Json<serde_json::Value> {
     }))
 }
 
+async fn update_verified_payloads_handler(State(db_state): State<Arc<DbPool>>) -> (StatusCode, Json<serde_json::Value>) {
+    let mut connection = db_state.get().unwrap();
+    let provider = get_provider().await.expect("Failed to get provider");
+    let previous_nonces = get_previous_values(&provider, U256::from(1)).await.unwrap();
+    update_payload(&mut connection, previous_nonces.into()).await;
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "code": 200,
+            "success": true
+        })),
+    )
+}
+
 async fn run_prover(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
     proof_type: &str,
-) -> (ProofFixture, String) {
+) -> (Option<(ProofFixture, String)>, Option<String>) {
     let (payload, _) = build_proving_payload(payload).await;
+
+    sp1_sdk::utils::setup_logger();
 
     let mut stdin = SP1Stdin::new();
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
@@ -366,13 +389,14 @@ async fn run_prover(
         .build();
 
     let (pk, vk) = prover_client.setup(ENERGY_TRACKER_ELF);
-
-    let proof = match proof_type {
+    let proof = match match proof_type {
         "plonk" => prover_client.prove(&pk, &stdin).strategy(FulfillmentStrategy::Auction).plonk().run_async().await,
         "groth16" => prover_client.prove(&pk, &stdin).strategy(FulfillmentStrategy::Auction).groth16().run_async().await,
         _ => panic!("Unsupported proof type: {}", proof_type),
-    }
-    .expect("proof supposed to be generated");
+    } {
+        Ok(proof) => proof,
+        Err(e) => return (None, Some(format!("Prover error: {:?}", e))),
+    };
 
     let proof_fixture = create_proof_fixture(&proof, &vk);
     println!("Proof generated successfully proof = {:?}", &proof_fixture);
@@ -387,7 +411,7 @@ async fn run_prover(
     .await
     .expect("msg: Failed to commit state");
 
-    (proof_fixture, hash.to_string())
+    (Some((proof_fixture, hash.to_string())), None)
 }
 
 async fn build_proving_payload(
@@ -430,18 +454,26 @@ async fn build_proving_payload(
     )
 }
 
-async fn _update_payload(
+async fn update_payload(
     connection: &mut PooledConnection<ConnectionManager<PgConnection>>,
-    payloads: Vec<M3terPayload>,
+    nonces: Vec<u8>,
 ) {
-    use self::m3ter_payloads::dsl::*;
-    use diesel::prelude::*;
-
-    diesel::update(m3ter_payloads.filter(id.eq_any(payloads.iter().map(|p| p.id))))
-        .set(is_verified.eq(true))
-        .execute(connection)
-        .expect("Failed to update payloads");
-    println!("Updated {} payloads to verified", payloads.len());
+    nonces.chunks_exact(6)
+        .enumerate()
+        .filter_map(|(i, nonce)| {
+            let nonce = decode_slice(nonce.try_into().ok()?);
+            if nonce != 0 { Some((i, nonce as i64)) } else {
+                None
+            }
+        })
+        .for_each(|(i, _nonce)| {
+            use self::m3ter_payloads::dsl::*;
+            use diesel::prelude::*;
+            let _ = diesel::update(m3ter_payloads.filter(m3ter_id.eq(i as i64).and(nonce.le(_nonce))))
+                .set(is_verified.eq(true))
+                .execute(connection)
+                .expect("Failed to update payloads");
+        });
 }
 
 fn is_unique_nonce(
