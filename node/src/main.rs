@@ -111,7 +111,10 @@ async fn main() {
                     )
                     .load::<M3terPayload>(&mut conn)
                     .expect("Failed to load payloads");
-
+                    if proving_payload.is_empty() {
+                        println!("No new payloads to process");
+                        continue;
+                    }
                     let mut grouped: HashMap<String, Vec<energy_tracker_lib::M3terPayload>> = HashMap::new();
                     for payload in &proving_payload {
                         grouped

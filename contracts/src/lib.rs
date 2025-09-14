@@ -21,7 +21,7 @@ pub struct Account {
 }
 
 fn get_rollup_address() -> Address {
-    "0x7b054580aEA6B6cbdF30BbbE84777bae623F4d1e"
+    "0xf8f2d4315DB5db38f3e5c45D0bCd59959c603d9b"
         .parse()
         .expect("Invalid address")
 }
