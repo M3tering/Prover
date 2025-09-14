@@ -26,6 +26,7 @@ use serde_json::json;
 use sp1_sdk::{
     include_elf, network::FulfillmentStrategy, HashableKey, Prover, ProverClient, SP1ProofWithPublicValues, SP1Stdin, SP1VerifyingKey
 };
+use tokio::time::{self, Duration};
 
 /// The ELF (executable and linkable format) file for the Succinct RISC-V zkVM.
 pub const ENERGY_TRACKER_ELF: &[u8] = include_elf!("energy-tracker-program");
@@ -96,33 +97,42 @@ async fn main() {
     let db_state = Arc::new(db_pool.clone());
     println!("connected to database");
 
-    // tokio::spawn(async move {
-    //     let mut interval = time::interval(Duration::from_secs(60 * 50));
-    //     loop {
-    //         interval.tick().await;
-    //         match db_pool.get() {
-    //             Ok(mut _conn) => {
-    //                 #[derive(Deserialize, Debug)]
-    //                 struct SamplePayload(
-    //                     #[serde(deserialize_with = "deserialize_payload")]
-    //                     HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
-    //                 );
-    //                 // Setup the inputs.
-    //                 // let file = File::open("/home/godwin/energy-tracker/node/src/samples.json").await.unwrap();
-    //                 let mut file = File::create("src/foo.txt").await.unwrap();
-    //                 file.write_all(b"hello, world!").await.unwrap();
-    //                 // let reader = BufReader::new(file);
-    //                 // let payloads: SamplePayload = serde_json::from_reader(reader.buffer()).unwrap();
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(60 * 50));
+        loop {
+            interval.tick().await;
+            match db_pool.get() {
+                Ok(mut conn) => {
+                    let proving_payload = sql_query(
+                        "SELECT *
+                        FROM m3ter_payloads
+                        WHERE is_verified = FALSE
+                        LIMIT 100",
+                    )
+                    .load::<M3terPayload>(&mut conn)
+                    .expect("Failed to load payloads");
 
-    //                 // let _ = execute_prover(payloads.0).await;
-    //                 break;
-    //             }
-    //             Err(e) => {
-    //                 println!("encountered error {:?}", e);
-    //             }
-    //         }
-    //     }
-    // });
+                    let mut grouped: HashMap<String, Vec<energy_tracker_lib::M3terPayload>> = HashMap::new();
+                    for payload in &proving_payload {
+                        grouped
+                            .entry(payload.m3ter_id.to_string())
+                            .or_default()
+                            .push(energy_tracker_lib::M3terPayload::new(
+                                payload.message.clone(),
+                                payload.signature.clone(),
+                                payload.nonce as u64,
+                                payload.energy as u64,
+                            ));
+                    }
+                    let (proof_fixture, hash) = run_prover(grouped, "groth16").await;
+                    update
+                }
+                Err(e) => {
+                    println!("encountered error {:?}", e);
+                }
+            }
+        }
+    });
 
     let app = Router::new()
         .route("/", get(root))
@@ -294,50 +304,6 @@ async fn run_prover_handler(
         })),
     )
 }
-
-// async fn execute_prover_handler(
-//     State(_db_state): State<Arc<DbPool>>,
-//     Json(_payload): Json<M3terPayloadInbound>,
-// ) -> (StatusCode, Json<serde_json::Value>) {
-//     #[derive(Deserialize, Debug)]
-//     struct SamplePayload(
-//         #[serde(deserialize_with = "deserialize_payload")]
-//         HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
-//     );
-//     // Setup the inputs.
-//     let file = File::open("/home/godwin/energy-tracker/node/src/samples.json")
-//         .await
-//         .unwrap();
-
-//     let reader = BufReader::new(file);
-//     let payloads: SamplePayload = serde_json::from_reader(reader.buffer()).unwrap();
-
-//     // let _ = execute_prover(payloads.0).await;
-//     let (payload, _) = build_proving_payload(payloads.0).await;
-
-//     let mut stdin = SP1Stdin::new();
-//     let _private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
-//     let _rpc_url = env::var("NETWORK_RPC_URL").expect("RPC_URL not set in .env");
-//     stdin.write(&payload);
-//     let prover_client = ProverClient::builder()
-//         // .network()
-//         // .private_key(&private_key)
-//         // .rpc_url(&rpc_url)
-//         .cpu()
-//         .build();
-//     let (output, report) = prover_client
-//         .execute(ENERGY_TRACKER_ELF, &stdin)
-//         .run()
-//         .unwrap();
-//     println!("output {:?} and report {:?}", output, report);
-//     (
-//         StatusCode::OK,
-//         Json(json!({
-//             "code": 200,
-//             "success": true
-//         })),
-//     )
-// }
 
 async fn get_prover_vkey() -> Json<serde_json::Value> {
     let prover = ProverClient::builder().cpu().build();

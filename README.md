@@ -1,91 +1,83 @@
-# SP1 Project Template
+# Energy Tracker SP1 Project
 
-This is a template for creating an end-to-end [SP1](https://github.com/succinctlabs/sp1) project
-that can generate a proof of any RISC-V program.
+This project is an end-to-end [SP1](https://github.com/succinctlabs/sp1) template for generating proofs of RISC-V programs, tracking energy payloads, and interacting with EVM-compatible proofs.
 
 ## Requirements
 
 - [Rust](https://rustup.rs/)
 - [SP1](https://docs.succinct.xyz/docs/sp1/getting-started/install)
+- [PostgreSQL](https://www.postgresql.org/download/)
+- [Diesel CLI](https://diesel.rs/guides/getting-started/)
 
-## Running the Project
+## Setup
 
-There are 3 main ways to run this project: execute a program, generate a core proof, and
-generate an EVM-compatible proof.
+1. **Clone the repository:**
+   ```sh
+   git clone https://github.com/your-org/energy-tracker.git
+   cd energy-tracker
+   ```
 
-### Build the Program
+2. **Install dependencies:**
+   - Install Rust and SP1 as described above.
+   - Install Diesel CLI:
+     ```sh
+     cargo install diesel_cli --no-default-features --features postgres
+     ```
 
-The program is automatically built through `script/build.rs` when the script is built.
+3. **Configure environment variables:**
+   - Copy the example environment file and edit as needed:
+     ```sh
+     cp .env.example .env
+     ```
+   - Set your database URL and any required RPC URLs in `.env`.
 
-### Execute the Program
+4. **Setup the database:**
+   - Create the database:
+     ```sh
+     createdb m3tering-db
+     ```
+   - Run Diesel migrations:
+     ```sh
+     diesel migration run
+     ```
 
-To run the program without generating a proof:
+## Running the Program
 
-```sh
-cd script
-cargo run --release -- --execute
-```
+### Build and Run the Node
 
-This will execute the program and display the output.
-
-### Generate an SP1 Core Proof
-
-To generate an SP1 [core proof](https://docs.succinct.xyz/docs/sp1/generating-proofs/proof-types#core-default) for your program:
-
-```sh
-cd script
-cargo run --release -- --prove
-```
-
-### Generate an EVM-Compatible Proof
-
-> [!WARNING]
-> You will need at least 16GB RAM to generate a Groth16 or PLONK proof. View the [SP1 docs](https://docs.succinct.xyz/docs/sp1/getting-started/hardware-requirements#local-proving) for more information.
-
-Generating a proof that is cheap to verify on the EVM (e.g. Groth16 or PLONK) is more intensive than generating a core proof.
-
-To generate a Groth16 proof:
-
-```sh
-cd script
-cargo run --release --bin evm -- --system groth16
-```
-
-To generate a PLONK proof:
+The main backend service is in the `node` package. To start the server:
 
 ```sh
-cargo run --release --bin evm -- --system plonk
+cargo run --release
 ```
 
-These commands will also generate fixtures that can be used to test the verification of SP1 proofs
-inside Solidity.
+The server will start on `http://localhost:8080` and expose several endpoints:
+- `/payload` — Submit a single energy payload (POST)
+- `/batch-payloads` — Submit multiple payloads (POST)
+- `/run_prover` — Generate a proof (GET)
+- `/vkey` — Retrieve the verification key (GET)
+- `/health` — Health check (GET)
 
-### Retrieve the Verification Key
-
-To retrieve your `programVKey` for your on-chain contract, run the following command in `script`:
+### Example: Submit a Payload
 
 ```sh
-cargo run --release --bin vkey
+curl -X POST http://localhost:8080/payload \
+  -H "Content-Type: application/json" \
+  -d '{"m3ter_id":12345,"message":"payload_data"}'
 ```
 
-## Using the Prover Network
-
-We highly recommend using the [Succinct Prover Network](https://docs.succinct.xyz/docs/network/introduction) 
-for any non-trivial programs or benchmarking purposes. For more information, 
-see the [key setup guide](https://docs.succinct.xyz/docs/network/developers/key-setup) to get started.
-
-To get started, copy the example environment file:
+### Example: Generate a Proof
 
 ```sh
-cp .env.example .env
+curl "http://localhost:8080/run_prover?proof_type=groth16"
 ```
 
-Then, set the `SP1_PROVER` environment variable to `network` and set the `NETWORK_PRIVATE_KEY`
-environment variable to your whitelisted private key.
+## Troubleshooting
 
-For example, to generate an EVM-compatible proof using the prover network, run the following
-command:
+- Ensure your `.env` file is correctly configured and loaded.
+- Make sure PostgreSQL is running and accessible.
+- If you encounter build errors, update your toolchains and dependencies.
 
-```sh
-SP1_PROVER=network NETWORK_PRIVATE_KEY=... cargo run --release --bin evm
-```
+## License
+
+MIT

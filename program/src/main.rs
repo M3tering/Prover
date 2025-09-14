@@ -7,12 +7,6 @@ use energy_tracker_lib::{
     calc_slot_key, get_state_root, to_b256, to_keccak_hash, to_u256, track_energy, trim_zeros,
     verify_account_proof, M3ter, Payload, PublicValuesStruct,
 };
-// use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-// use rayon::{
-//     iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
-//     slice::ParallelSliceMut,
-// };
-// use serde::de;
 
 pub fn main() {
     let payload = sp1_zkvm::io::read::<Payload>();
@@ -82,58 +76,8 @@ pub fn main() {
             previous_balances.len()
         )
     }
-    // println!("proofs {:?}", proofs);
     let mut new_nonces = previous_nonces.clone();
     let mut new_balances = previous_balances.clone();
-
-    // mempool.par_iter().for_each(|(m3ter_key, m3ter_payloads)| {
-    // let m3ter_id = m3ter_key.parse::<usize>().unwrap();
-    // let (public_key, proof) = match proofs.get(dbg!(&to_b256(
-    //     calc_slot_key(to_u256(m3ter_id as u64)).unwrap()
-    // ))) {
-    //     Some(value) => value,
-    //     None => panic!("failed to get proof for m3ter {}", m3ter_id),
-    // };
-    // let public_key = to_b256(*public_key).to_string();
-    // let m3ter = M3ter::new(m3ter_key, &public_key);
-    // let (start, end) = m3ter_position(m3ter_id); // position of m3ter previous values in concatenated bytes
-
-    // let (nonce, balance) = if start >= previous_nonces.len() {
-    //     (0u64, 0u64)
-    // } else {
-    //     (
-    //         decode_slice(&previous_nonces[start..end].try_into().unwrap()),
-    //         decode_slice(&previous_balances[start..end].try_into().unwrap()),
-    //     )
-    // };
-    // let (energy_sum, latest_nonce) =
-    //     track_energy(m3ter, m3ter_payloads, nonce, (&storage_hash, proof));
-    // let energy_sum = energy_sum + balance;
-    // println!(
-    //     "Values after tracking = Energy Sum: {}, Latest Nonce: {}",
-    //     energy_sum, latest_nonce
-    // );
-
-    // let (nonce_encoded, nonce_status) = encode_slice(latest_nonce);
-    // let (balance_encoded, status) = encode_slice(energy_sum);
-    // if !nonce_status || !status {
-    //     println!(
-    //         "Nonce or balance exceeds the 6-byte limit for m3ter ID: {}  ",
-    //         m3ter_id
-    //     );
-    // return;
-    // }
-    // (start, end, nonce_encoded, balance_encoded)
-    // result.par_sort_by(|a, b| {a.0.cmp(&b.0)});
-    // .par
-    // .fold(
-    //     || NewValues::new(&previous_nonces, &previous_balances),
-    //     |new_values, (start, end, nonce, balance)| {
-    //         new_values.acc_values(start, end, nonce, balance)
-    //     },
-    // );
-
-    // println!("result new nonces {:?}", result);
 
     for (m3ter_key, m3ter_payloads) in mempool {
         let m3ter_id = m3ter_key.parse::<usize>().unwrap();
