@@ -51,6 +51,18 @@ The main backend service is in the `node` package. To start the server:
 cargo run --release
 ```
 
+### Proving Thread
+
+The proving process runs in a **dedicated background thread** using Tokio.  
+This thread periodically (interval configurable via the `BLOCK_INTERVAL` environment variable) queries the database for unverified payloads, groups them, and runs the prover logic.  
+Once a proof is generated, the thread commits the state and updates the relevant payloads as verified in the database.
+
+**Key points:**
+- The proving thread does not block the main server endpoints.
+- The interval for proving is set via the `.env` file (`BLOCK_INTERVAL`).
+- All database and proving operations are handled asynchronously.
+
+
 The server will start on `http://localhost:8080` and expose several endpoints:
 - `/payload` — Submit a single energy payload (POST)
 - `/batch-payloads` — Submit multiple payloads (POST)
