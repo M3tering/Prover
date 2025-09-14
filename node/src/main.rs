@@ -130,6 +130,7 @@ async fn main() {
                     let (proof_fixture, hash) = run_prover(grouped, "groth16").await;
                     println!("Committed state with tx hash: {} and proof: {:?}", hash, proof_fixture);
                     update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
+                    println!("Updated payloads as verified");
                 }
                 Err(e) => {
                     println!("encountered error {:?}", e);
