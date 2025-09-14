@@ -16,7 +16,7 @@ use diesel::{
 };
 
 use energy_tracker_lib::{
-    Payload, ProofStruct, PublicValuesStruct, calc_slot_key, destructure_payload, extract_nonce,
+    Payload, ProofStruct, PublicValuesStruct, calc_slot_key, destructure_payload, extract_nonce, decode_slice
 };
 use energy_tracker_verifier::{
     commit_state, get_block_rpl_bytes, get_previous_values, get_provider, get_storage_proofs,
@@ -107,7 +107,7 @@ async fn main() {
                         "SELECT *
                         FROM m3ter_payloads
                         WHERE is_verified = FALSE
-                        LIMIT 100",
+                        LIMIT 1000",
                     )
                     .load::<M3terPayload>(&mut conn)
                     .expect("Failed to load payloads");
@@ -125,7 +125,8 @@ async fn main() {
                             ));
                     }
                     let (proof_fixture, hash) = run_prover(grouped, "groth16").await;
-                    update
+                    println!("Committed state with tx hash: {} and proof: {:?}", hash, proof_fixture);
+                    update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
                 }
                 Err(e) => {
                     println!("encountered error {:?}", e);
@@ -396,18 +397,26 @@ async fn build_proving_payload(
     )
 }
 
-async fn _update_payload(
+async fn update_payload(
     connection: &mut PooledConnection<ConnectionManager<PgConnection>>,
-    payloads: Vec<M3terPayload>,
+    nonces: Vec<u8>,
 ) {
-    use self::m3ter_payloads::dsl::*;
-    use diesel::prelude::*;
-
-    diesel::update(m3ter_payloads.filter(id.eq_any(payloads.iter().map(|p| p.id))))
-        .set(is_verified.eq(true))
-        .execute(connection)
-        .expect("Failed to update payloads");
-    println!("Updated {} payloads to verified", payloads.len());
+    nonces.chunks_exact(6)
+        .enumerate()
+        .filter_map(|(i, nonce)| {
+            let nonce = decode_slice(nonce.try_into().ok()?);
+            if nonce != 0 { Some((i, nonce as i64)) } else {
+                None
+            }
+        })
+        .for_each(|(i, _nonce)| {
+            use self::m3ter_payloads::dsl::*;
+            use diesel::prelude::*;
+            let _ = diesel::update(m3ter_payloads.filter(m3ter_id.eq(i as i64).and(nonce.le(_nonce))))
+                .set(is_verified.eq(true))
+                .execute(connection)
+                .expect("Failed to update payloads");
+        });
 }
 
 fn is_unique_nonce(

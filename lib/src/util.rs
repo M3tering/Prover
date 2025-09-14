@@ -72,30 +72,47 @@ pub fn verify_account_proof(
 pub fn destructure_payload(payload: &str) -> (&str, &str, u64, u64) {
     let payload_bytes = hex::decode(payload).expect("Failed to decode hex payload");
     let (message, signature) = payload.split_at(16);
-    let nonce_bytes: [u8; 4] = payload_bytes[0..4].try_into().expect("Failed to get nonce bytes");
-    let energy_bytes: [u8; 4] = payload_bytes[4..8].try_into().expect("Failed to get energy bytes");
+    let nonce_bytes: [u8; 4] = payload_bytes[0..4]
+        .try_into()
+        .expect("Failed to get nonce bytes");
+    let energy_bytes: [u8; 4] = payload_bytes[4..8]
+        .try_into()
+        .expect("Failed to get energy bytes");
     let nonce = u32::from_be_bytes(nonce_bytes) as u64;
-    let energy = u32::from_be_bytes(energy_bytes) as u64; 
+    let energy = u32::from_be_bytes(energy_bytes) as u64;
     (message, signature, nonce, energy)
+}
+
+pub fn decode_slice(data: &[u8; 6]) -> u64 {
+    // Convert 6 bytes to i64 (big-endian, pad with zeros)
+    let mut buf = [0u8; 8];
+    buf[2..].copy_from_slice(data); // pad the first 2 bytes with zeros
+    u64::from_be_bytes(buf)
 }
 
 pub fn extract_nonce(payload: &str) -> i64 {
     println!("payload {}", payload);
     let payload_bytes = hex::decode(payload).expect("Failed to decode hex payload");
-    let nonce_bytes: [u8; 4] = payload_bytes[0..4].try_into().expect("Failed to get nonce bytes");
+    let nonce_bytes: [u8; 4] = payload_bytes[0..4]
+        .try_into()
+        .expect("Failed to get nonce bytes");
     i32::from_be_bytes(nonce_bytes) as i64
 }
 
 pub fn trim_zeros(value: Vec<u8>) -> Vec<u8> {
     let mut value = value;
-    if value.is_empty() { return value; }
+    if value.is_empty() {
+        return value;
+    }
     loop {
         let mut buf = [0u8; 8];
         let data: [u8; 6] = value[(value.len() - 6)..].try_into().unwrap();
         buf[2..].copy_from_slice(&data); // pad the first 2 bytes with zeros
-        if u64::from_be_bytes(buf) == 0u64 { 
+        if u64::from_be_bytes(buf) == 0u64 {
             value = value.strip_suffix(&[0u8; 6]).unwrap().to_vec();
-        } else { break; }
+        } else {
+            break;
+        }
     }
     value
 }
@@ -117,6 +134,6 @@ pub fn calc_slot_key(key: U256) -> Option<U256> {
         "97075990194835763561528983445257952440596761921281503889599705229225710478219"
             .parse()
             .expect("invalid slot literal");
-    
+
     key.checked_add(slot_literal)
 }
