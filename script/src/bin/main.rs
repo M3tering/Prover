@@ -94,7 +94,7 @@ async fn main() -> eyre::Result<()> {
     let mut trimmed = HashMap::new();
 
     payloads.0.iter().for_each(|(key, value)| {
-        trimmed.insert(key.to_string(), value[0..].to_vec());
+        trimmed.insert(key.to_string(), value[0..30].to_vec());
     });
 
     let provider = get_provider().await?;

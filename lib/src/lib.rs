@@ -208,12 +208,13 @@ pub fn track_energy(
         .fold(
             || (0, start_nonce),
             |(energy, nonce), payload| {
-                if nonce != start_nonce && nonce + 1 != payload.nonce {
+                println!("nonce {}, payload nonce {}", nonce, payload.nonce);
+                if nonce + 1 != payload.nonce {
                     println!(
                         "Invalid nonce: {} < {} for m3ter_id {}",
                         &payload.nonce, &nonce, &m3ter.m3ter_id
                     );
-                    return (energy, nonce); // Nonce is not sequential or is less than the latest nonce
+                    return (energy, if nonce < payload.nonce { payload.nonce } else { nonce }); 
                 }
                 if !m3ter.validate_payload(payload, verifying_key) {
                     println!("Invalid payload: {:?}", payload);
