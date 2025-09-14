@@ -98,7 +98,10 @@ async fn main() {
     println!("connected to database");
 
     tokio::spawn(async move {
-        let mut interval = time::interval(Duration::from_secs(60 * 50));
+        let duration = env::var("BLOCK_INTERVAL")
+            .parse::<u64>()
+            .unwrap_or(3000);
+        let mut interval = time::interval(Duration::from_secs(duration));
         loop {
             interval.tick().await;
             match db_pool.get() {
