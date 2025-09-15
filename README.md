@@ -9,7 +9,22 @@ This project is an end-to-end [SP1](https://github.com/succinctlabs/sp1) templat
 - [PostgreSQL](https://www.postgresql.org/download/)
 - [Diesel CLI](https://diesel.rs/guides/getting-started/)
 
-## Setup
+## Quick Setup (Recommended)
+
+To make setup easy, use the provided `setup.sh` script. This will:
+- Clone the repository (if not already cloned)
+- Check for required dependencies
+- Create the `.env` file if missing
+- Create the PostgreSQL database
+- Run Diesel migrations
+
+Run the setup script from your terminal:
+
+```sh
+bash setup.sh
+```
+
+## Manual Setup
 
 1. **Clone the repository:**
    ```sh
@@ -61,7 +76,6 @@ Once a proof is generated, the thread commits the state and updates the relevant
 - The proving thread does not block the main server endpoints.
 - The interval for proving is set via the `.env` file (`BLOCK_INTERVAL`).
 - All database and proving operations are handled asynchronously.
-
 
 The server will start on `http://localhost:8080` and expose several endpoints:
 - `/payload` — Submit a single energy payload (POST)
