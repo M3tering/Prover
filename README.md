@@ -143,4 +143,4 @@ curl "http://localhost:8080/run_prover?proof_type=groth16"
 
 ## License
 
-[MIT](LICENCE)
+[MIT](LICENSE)
