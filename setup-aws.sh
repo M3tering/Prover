@@ -58,13 +58,13 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='m3tering-db'
 
 # --- Clone project ---
 echo "Cloning latest project release..."
-if [ ! -d "$HOME/energy-tracker-node" ]; then
-    git clone --depth=1 --branch main https://github.com/M3tering/Prover.git energy-tracker-node
+if [ ! -d "$HOME/m3terchain-prover" ]; then
+    git clone --depth=1 --branch main https://github.com/M3tering/Prover.git m3terchain-prover
 else
-    cd energy-tracker-node && git pull origin main && cd ..
+    cd m3terchain-prover && git pull origin main && cd ..
 fi
 
-cd energy-tracker-node
+cd m3terchain-prover
 
 # --- Run DB migrations ---
 echo "Running Diesel migrations..."
@@ -108,7 +108,7 @@ EOL
 
 # --- Configure systemd service ---
 echo "Configuring systemd service..."
-SERVICE_FILE=/etc/systemd/system/energy-tracker-node.service
+SERVICE_FILE=/etc/systemd/system/m3terchain-prover.service
 sudo bash -c "cat > $SERVICE_FILE" <<EOL
 [Unit]
 Description=Energy Tracker Node Service
@@ -116,9 +116,9 @@ After=network.target postgresql.service
 
 [Service]
 User=$USER
-WorkingDirectory=$HOME/energy-tracker-node
+WorkingDirectory=$HOME/m3terchain-prover
 Environment=PATH=$HOME/.cargo/bin:$HOME/.sp1/bin:/usr/bin:/bin
-EnvironmentFile=$HOME/energy-tracker-node/.env
+EnvironmentFile=$HOME/m3terchain-prover/.env
 ExecStart=$HOME/.cargo/bin/cargo run --release
 Restart=always
 RestartSec=5
@@ -129,13 +129,13 @@ WantedBy=multi-user.target
 EOL
 
 sudo systemctl daemon-reload
-sudo systemctl enable energy-tracker-node
-sudo systemctl start energy-tracker-node
+sudo systemctl enable m3terchain-prover
+sudo systemctl start m3terchain-prover
 
 # --- Nginx setup ---
 if [ -n "$DOMAIN_NAME" ]; then
     echo "Configuring Nginx for domain: $DOMAIN_NAME"
-    sudo tee /etc/nginx/sites-available/energy-tracker-node > /dev/null <<EOL
+    sudo tee /etc/nginx/sites-available/m3terchain-prover > /dev/null <<EOL
 server {
     listen 80;
     server_name ${DOMAIN_NAME};
@@ -150,10 +150,10 @@ server {
     }
 }
 EOL
-    sudo ln -sf /etc/nginx/sites-available/energy-tracker-node /etc/nginx/sites-enabled/
+    sudo ln -sf /etc/nginx/sites-available/m3terchain-prover /etc/nginx/sites-enabled/
     sudo nginx -t && sudo systemctl restart nginx
 else
-   sudo tee /etc/nginx/sites-available/energy-tracker-node > /dev/null <<EOL
+   sudo tee /etc/nginx/sites-available/m3terchain-prover > /dev/null <<EOL
 server {
     listen 80;
     server_name _;
@@ -168,7 +168,7 @@ server {
     }
 }
 EOL
-    sudo ln -sf /etc/nginx/sites-available/energy-tracker-node /etc/nginx/sites-enabled/
+    sudo ln -sf /etc/nginx/sites-available/m3terchain-prover /etc/nginx/sites-enabled/
     sudo nginx -t && sudo systemctl restart nginx
 fi
 
@@ -182,4 +182,4 @@ echo "    ____         ______          __                    __                 
 / /_/ / / /  / /_/ / /_/ / / /  __/ /  (__  )  / / / / / / /_/ (__  ) /_   / /_/ / /  / / / / / /_/ /  / /_/ / /_/ / /_/ /_/ / 
 \__,_/_/_/   \____/\__/_/ /_/\___/_/  /____/  /_/ /_/ /_/\__,_/____/\__/  /_.___/_/  /_/_/ /_/\__, /   \__,_/\__,_/\__/\__,_/  
                                                                                              /____/                            "
-echo "Service is running: systemctl status energy-tracker-node"
+echo "Service is running: systemctl status m3terchain-prover"
