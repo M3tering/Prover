@@ -21,7 +21,7 @@ To make setup easy, use the provided `setup.sh` script. This will:
 Run the setup script from your terminal:
 
 ```sh
-bash setup.sh
+curl -sSL https://raw.githubusercontent.com/M3tering/Prover/main/setup.sh | bash
 ```
 
 ## AWS Setup
@@ -40,7 +40,7 @@ For automated deployment on AWS EC2 or similar Linux servers, use the provided `
 To run the AWS setup script:
 
 ```sh
-bash setup-aws.sh
+curl -sSL https://raw.githubusercontent.com/M3tering/Prover/main/setup-aws.sh | bash
 ```
 
 You will be prompted for your domain name (optional) and PostgreSQL password.  
