@@ -24,6 +24,28 @@ Run the setup script from your terminal:
 bash setup.sh
 ```
 
+## AWS Setup
+
+For automated deployment on AWS EC2 or similar Linux servers, use the provided `setup-aws.sh` script. This script:
+
+- Installs all required system dependencies (Rust, Diesel CLI, PostgreSQL, Nginx, etc.)
+- Sets up PostgreSQL with a dedicated user and database
+- Clones the latest project release
+- Runs Diesel migrations
+- Installs SP1 and verifies installation
+- Creates a `.env` file with your database credentials and other configuration
+- Configures and enables a systemd service for automatic startup
+- Sets up Nginx as a reverse proxy (with optional domain name support)
+
+To run the AWS setup script:
+
+```sh
+bash setup-aws.sh
+```
+
+You will be prompted for your domain name (optional) and PostgreSQL password.  
+After setup, the service will be running and accessible via your domain or server IP.
+
 ## Manual Setup
 
 1. **Clone the repository:**

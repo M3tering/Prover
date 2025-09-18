@@ -5,8 +5,8 @@ set -e
 
 echo "=== Energy Tracker Setup Script ==="
 
-REPO_URL="https://github.com/your-org/energy-tracker.git"
-REPO_DIR="energy-tracker"
+REPO_URL="https://github.com/M3tering/Prover.git"
+REPO_DIR="Prover"
 
 # Clone the repository if not already present
 if [ ! -d "$REPO_DIR" ]; then
@@ -41,6 +41,7 @@ if [ ! -f .env ]; then
     if [ -f .env.example ]; then
         cp .env.example .env
         echo "Copied .env.example to .env"
+        echo "update .env to avoid errors during runtime"
     else
         echo "No .env.example found. Please create a .env file."
         exit 1
