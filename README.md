@@ -1,6 +1,6 @@
-# Energy Tracker SP1 Project
+# M3terChain Validity Rollup Prover
 
-This project is an end-to-end [SP1](https://github.com/succinctlabs/sp1) template for generating proofs of RISC-V programs, tracking energy payloads, and interacting with EVM-compatible proofs.
+This repository implements an [SP1](https://github.com/succinctlabs/sp1) based prover client for generating SNARK proofs of offchain energy metering, consistent with the m3tering protocol. 
 
 ## Requirements
 
@@ -50,8 +50,8 @@ After setup, the service will be running and accessible via your domain or serve
 
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/your-org/energy-tracker.git
-   cd energy-tracker
+   git clone https://github.com/m3tering/prover.git
+   cd prover
    ```
 
 2. **Install dependencies:**
@@ -143,4 +143,4 @@ curl "http://localhost:8080/run_prover?proof_type=groth16"
 
 ## License
 
-MIT
+[MIT](LICENCE)
