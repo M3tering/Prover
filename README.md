@@ -88,6 +88,21 @@ The main backend service is in the `node` package. To start the server:
 cargo run --release
 ```
 
+### Expose Local Server with ngrok
+
+If you want to expose your local server to the internet (for testing webhooks, integrations, etc.), you can use ngrok:
+Install ngrok (if not already installed)
+
+Expose your local server (port 8080):
+
+```sh
+ngrok http 8080
+```
+
+Copy the forwarding URL from the ngrok output and use it to access your local server from anywhere.
+
+Note: You may need to sign up for an ngrok account and authenticate your agent for extended usage.
+
 ### Proving Thread
 
 The proving process runs in a **dedicated background thread** using Tokio.  
