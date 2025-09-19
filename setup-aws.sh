@@ -32,6 +32,14 @@ if [ -z "$DB_PASS" ]; then
 fi
 export DB_PASS
 
+# --- Prompt Private Key ---
+read -s -p "Enter private key: " PRIVATE_KEY
+if [ -z "$PRIVATE_KEY" ]; then
+    PRIVATE_KEY=$(openssl rand -hex 32)
+    echo "Generated private key: $PRIVATE_KEY"
+fi
+export PRIVATE_KEY
+
 # --- Update system ---
 sudo apt update && sudo apt upgrade -y
 
@@ -103,7 +111,7 @@ RPC_URL=
 NETWORK_RPC_URL=
 
 ## Proof requester private key
-PRIVATE_KEY=
+PRIVATE_KEY=${PRIVATE_KEY}
 
 ## Interval (in seconds) at which to check for new transactions and create new rollup proofs
 BLOCK_INTERVAL=10
