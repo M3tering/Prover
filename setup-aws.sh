@@ -26,6 +26,10 @@ read -p "Enter your domain name (leave blank to use localhost): " DOMAIN_NAME
 # --- Prompt DB password ---
 read -s -p "Enter password for PostgreSQL user 'm3tering': " DB_PASS
 echo
+if [ -z "$DB_PASS" ]; then
+    DB_PASS=$(openssl rand -hex 16)
+    echo "Generated DB password: $DB_PASS"
+fi
 export DB_PASS
 
 # --- Update system ---
@@ -90,6 +94,7 @@ else
 fi
 
 # --- Setup environment file ---
+touch .env
 cat > .env <<EOL
 ## RPC_URL for connecting to an Ethereum node
 RPC_URL=
@@ -104,7 +109,7 @@ PRIVATE_KEY=
 BLOCK_INTERVAL=10
 
 ## Database connection string
-DATABASE_URL=postgres://m3tering:${DB_PASS}@localhost/m3tering-db
+DATABASE_URL=${DATABASE_URL}
 EOL
 
 # --- Configure systemd service ---
