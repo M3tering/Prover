@@ -17,3 +17,6 @@ pgo-data.profdata
 
 # Env
 .env
+
+# DIESEL files
+schema.rs

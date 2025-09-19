@@ -26,7 +26,19 @@ read -p "Enter your domain name (leave blank to use localhost): " DOMAIN_NAME
 # --- Prompt DB password ---
 read -s -p "Enter password for PostgreSQL user 'm3tering': " DB_PASS
 echo
+if [ -z "$DB_PASS" ]; then
+    DB_PASS=$(openssl rand -hex 16)
+    echo "Generated DB password: $DB_PASS"
+fi
 export DB_PASS
+
+# --- Prompt Private Key ---
+read -s -p "Enter private key: " PRIVATE_KEY
+if [ -z "$PRIVATE_KEY" ]; then
+    PRIVATE_KEY=$(openssl rand -hex 32)
+    echo "Generated private key: $PRIVATE_KEY"
+fi
+export PRIVATE_KEY
 
 # --- Update system ---
 sudo apt update && sudo apt upgrade -y
@@ -58,6 +70,7 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='m3tering-db'
 
 # --- Clone project ---
 echo "Cloning latest project release..."
+cd "$HOME"
 if [ ! -d "$HOME/m3terchain-prover" ]; then
     git clone --depth=1 --branch main https://github.com/M3tering/Prover.git m3terchain-prover
 else
@@ -89,6 +102,7 @@ else
 fi
 
 # --- Setup environment file ---
+touch .env
 cat > .env <<EOL
 ## RPC_URL for connecting to an Ethereum node
 RPC_URL=
@@ -97,13 +111,13 @@ RPC_URL=
 NETWORK_RPC_URL=
 
 ## Proof requester private key
-PRIVATE_KEY=
+PRIVATE_KEY=${PRIVATE_KEY}
 
 ## Interval (in seconds) at which to check for new transactions and create new rollup proofs
 BLOCK_INTERVAL=10
 
 ## Database connection string
-DATABASE_URL=postgres://m3tering:${DB_PASS}@localhost/m3tering-db
+DATABASE_URL=${DATABASE_URL}
 EOL
 
 # --- Configure systemd service ---
