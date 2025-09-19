@@ -58,6 +58,7 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='m3tering-db'
 
 # --- Clone project ---
 echo "Cloning latest project release..."
+cd "$HOME"
 if [ ! -d "$HOME/m3terchain-prover" ]; then
     git clone --depth=1 --branch main https://github.com/M3tering/Prover.git m3terchain-prover
 else
