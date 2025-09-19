@@ -78,6 +78,22 @@ fi
 echo "Running Diesel migrations..."
 diesel migration run
 
+# Check for SP1
+if ! command -v sp1up &>/dev/null; then
+    curl -L https://sp1up.succinct.xyz | bash
+    export PATH="$HOME/.sp1/bin:$PATH"
+    echo 'export PATH="$HOME/.sp1/bin:$PATH"' >> ~/.bashrc
+fi
+
+sp1up
+
+# Verify SP1
+if command -v cargo-prove &>/dev/null; then
+    echo "SP1 installed successfully: $(cargo prove --version)"
+else
+    echo "⚠️ SP1 installation failed or cargo-prove not found."
+fi
+
 echo "    ____         ______          __                    __                  __                                                  
    /  _/___     / ____/___  ____/ /  _      _____     / /________  _______/ /_                                                 
    / // __ \   / / __/ __ \/ __  /  | | /| / / _ \   / __/ ___/ / / / ___/ __/                                                 
