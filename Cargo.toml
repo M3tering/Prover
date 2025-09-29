@@ -1,5 +1,5 @@
 [workspace]
-members = ["lib", "program", "script", "contracts", "node"]
+members = ["lib", "program", "contracts", "node"]
 default-members = ["node"]
 resolver = "2"
 

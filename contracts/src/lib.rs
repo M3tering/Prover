@@ -110,11 +110,11 @@ pub async fn get_provider() -> Result<impl Provider> {
         "https://eth-sepolia.g.alchemy.com/v2/URjQnzNCUHumxPFL8VDoFBmpX4uqL6X8".to_string()
     });
     println!("Connecting to provider at: {}", rpc_url);
-    let private_key = "3b62b0fb8da4fc79eff9236c50527cd8bb9cd7c264f1c838b105d4570aa0491e"; //std::env::var("PRIVATE_KEY").expect("private key should exist in env");
+    let private_key = std::env::var("PRIVATE_KEY").expect("private key should exist in env");
     let private_key = if private_key.starts_with("0x") {
         private_key.strip_prefix("0x").unwrap()
     } else {
-        private_key
+        private_key.as_str()
     };
     let signer = PrivateKeySigner::from_slice(
         &hex::decode(private_key).expect("Failed to decode private key"),
