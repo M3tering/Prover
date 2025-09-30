@@ -99,7 +99,7 @@ async fn main() {
 
     tokio::spawn(async move {
         let duration = env::var("BLOCK_INTERVAL")
-            .unwrap_or("3000")
+            .unwrap_or("3000".to_string())
             .parse::<u64>()
             .unwrap();
         let mut interval = time::interval(Duration::from_secs(duration));
@@ -131,10 +131,15 @@ async fn main() {
                                 payload.energy as u64,
                             ));
                     }
-                    let (proof_fixture, hash) = run_prover(grouped, "groth16").await;
-                    println!("Committed state with tx hash: {} and proof: {:?}", hash, proof_fixture);
-                    update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
-                    println!("Updated payloads as verified");
+                    let (result, error) = run_prover(grouped, "groth16").await;
+
+                    if let Some((proof_fixture, hash)) = result {
+                        println!("Committed state with tx hash: {}", hash);
+                        update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
+                        println!("Updated payloads as verified");
+                    } else {
+                        println!("running prove failed. error {:?}", error.unwrap())
+                    }
                 }
                 Err(e) => {
                     println!("encountered error {:?}", e);
@@ -307,7 +312,7 @@ async fn run_prover_handler(
     if let Some(err) = error {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            1Json(json!({ "error": true, "message": err })),
+            Json(json!({ "error": true, "message": err })),
         );
     }
 
