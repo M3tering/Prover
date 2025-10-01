@@ -98,10 +98,9 @@ async fn main() {
     println!("connected to database");
 
     tokio::spawn(async move {
-        let duration = env::var("BLOCK_INTERVAL")
-            .unwrap_or("3000".to_string())
+        let duration = env::var("BLOCK_INTERVAL").unwrap()
             .parse::<u64>()
-            .unwrap();
+            .unwrap_or(3000);
         let mut interval = time::interval(Duration::from_secs(duration));
         loop {
             interval.tick().await;
@@ -162,7 +161,7 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
         .await
         .unwrap();
-    axum::serve::serve(listener, app).await.unwrap();
+    axum::serve::serve(listener, app).await.expect("server should start");
 }
 
 fn establish_db_connection() -> DbPool {
