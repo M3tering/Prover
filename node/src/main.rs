@@ -440,6 +440,15 @@ async fn update_payload(
     connection: &mut PooledConnection<ConnectionManager<PgConnection>>,
     nonces: Vec<u8>,
 ) {
+    enum DataStrategy {
+        Persist,
+        Delete,
+    }
+    let strategy: DataStrategy = match env::var("DATA_STRATEGY").unwrap().as_str() {
+        "persist" => DataStrategy::Persist,
+        "delete" => DataStrategy::Delete,
+        _ => DataStrategy::Persist,
+    };
     nonces.chunks_exact(6)
         .enumerate()
         .filter_map(|(i, nonce)| {
@@ -448,15 +457,25 @@ async fn update_payload(
                 None
             }
         })
-        .for_each(|(i, _nonce)| {
+        .for_each(|(i, nonce_)| {
             use self::m3ter_payloads::dsl::*;
             use diesel::prelude::*;
-            let _ = diesel::update(m3ter_payloads.filter(m3ter_id.eq(i as i64).and(nonce.le(_nonce))))
-                .set(is_verified.eq(true))
-                .execute(connection)
-                .expect("Failed to update payloads");
+            match strategy {
+                DataStrategy::Persist => {
+                    let _ = diesel::update(m3ter_payloads.filter(m3ter_id.eq(i as i64).and(nonce.le(nonce_))))
+                    .set(is_verified.eq(true))
+                    .execute(connection)
+                    .expect("Failed to update payloads");
+                },
+                DataStrategy::Delete => {
+                    let _ = diesel::delete(m3ter_payloads.filter(m3ter_id.eq(i as i64).and(nonce.eq(nonce_))))
+                    .execute(connection)
+                    .expect("Failed to delete payloads");
+                }
+            }
         });
 }
+
 
 fn is_unique_nonce(
     connection: &mut PooledConnection<ConnectionManager<PgConnection>>,
