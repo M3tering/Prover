@@ -164,8 +164,6 @@ server {
     }
 }
 EOL
-    sudo ln -sf /etc/nginx/sites-available/m3terchain-prover /etc/nginx/sites-enabled/
-    sudo nginx -t && sudo systemctl restart nginx
 else
    sudo tee /etc/nginx/sites-available/m3terchain-prover > /dev/null <<EOL
 server {
@@ -182,9 +180,11 @@ server {
     }
 }
 EOL
-    sudo ln -sf /etc/nginx/sites-available/m3terchain-prover /etc/nginx/sites-enabled/
-    sudo nginx -t && sudo systemctl restart nginx
 fi
+
+sudo ln -sf /etc/nginx/sites-available/m3terchain-prover /etc/nginx/sites-enabled/
+sudo rm /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl restart nginx
 
 echo "    ____         ______          __                    __                  __                                                  
    /  _/___     / ____/___  ____/ /  _      _____     / /________  _______/ /_                                                 
