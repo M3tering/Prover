@@ -206,10 +206,14 @@ pub fn track_energy(
             || (0, start_nonce),
             |(energy, nonce), payload| {
                 println!("nonce {}, payload nonce {}", nonce, payload.nonce);
+                if !m3ter.validate_payload(payload, verifying_key) {
+                    println!("Invalid payload: {:?}", payload);
+                    return (energy, nonce);
+                };
                 if nonce + 1 != payload.nonce {
                     println!(
-                        "Invalid nonce: {} < {} for m3ter_id {}",
-                        &payload.nonce, &nonce, &m3ter.m3ter_id
+                        "Invalid nonce: {} not consercutive to {} for m3ter_id {}",
+                        &nonce, &payload.nonce, &m3ter.m3ter_id
                     );
                     return (
                         energy,
@@ -220,10 +224,6 @@ pub fn track_energy(
                         },
                     );
                 } 
-                if !m3ter.validate_payload(payload, verifying_key) {
-                    println!("Invalid payload: {:?}", payload);
-                    return (energy, nonce);
-                };
                 let energy_sum = energy + payload.energy;
                 println!(
                     "State: energy {:?}, nonce {:?}",
@@ -236,7 +236,7 @@ pub fn track_energy(
             || (0, 0),
             |a, b| {
                 println!("Reducing: {:?} + {:?}", a.0, b.0);
-                (a.0 + b.0, if a.1 > b.1 { a.1 } else { b.1 })
+                if a.0 != 0 || b.0 != 0 { (a.0 + b.0, a.1.max(b.1)) } else { (0, start_nonce) }
             },
         )
 }

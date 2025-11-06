@@ -72,12 +72,13 @@ pub fn verify_account_proof(
 pub fn destructure_payload(payload: &str) -> (&str, &str, u64, u64) {
     let payload_bytes = hex::decode(payload).expect("Failed to decode hex payload");
     let (message, signature) = payload.split_at(16);
+    let signature = if signature.len() > 128 { &signature[0..128] } else {signature };
     let nonce_bytes: [u8; 4] = payload_bytes[0..4]
         .try_into()
         .expect("Failed to get nonce bytes");
     let energy_bytes: [u8; 4] = payload_bytes[4..8]
         .try_into()
-        .expect("Failed to get energy bytes");
+        .expect("Failed to get energy bytes");  
     let nonce = u32::from_be_bytes(nonce_bytes) as u64;
     let energy = u32::from_be_bytes(energy_bytes) as u64;
     (message, signature, nonce, energy)
@@ -136,4 +137,14 @@ pub fn calc_slot_key(key: U256) -> Option<U256> {
             .expect("invalid slot literal");
 
     key.checked_add(slot_literal)
+}
+
+#[test]
+fn test_payload_destructure() {
+    let payload = "00000019000002477c0c425640aa751f2cf2059ed4220f681dd96447588d5d0e69115791ffa122780935516ed1f4a25579f88699b2c5d17be12ea9cf88052808b57410a821aed4040086";   
+    let (message, signature, nonce, energy) = destructure_payload(payload);
+    assert_eq!(message, "0000001900000247");
+    assert_eq!(signature, "7c0c425640aa751f2cf2059ed4220f681dd96447588d5d0e69115791ffa122780935516ed1f4a25579f88699b2c5d17be12ea9cf88052808b57410a821aed404");  
+    assert_eq!(nonce, 25);
+    assert_ne!(energy, 100);
 }

@@ -1,0 +1,17 @@
+{
+  "name": "streamr-client",
+  "version": "0.0.1",
+  "description": "streamr client to subscribe to m3ter stream",
+  "main": "index.js",
+  "scripts": {
+    "start": "node ./index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Godwin",
+  "license": "MIT",
+  "dependencies": {
+    "@streamr/sdk": "^103.1.0",
+    "express": "^5.1.0",
+    "pg-promise": "^12.2.0"
+  }
+}

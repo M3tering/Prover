@@ -339,7 +339,7 @@ async fn update_verified_payloads_handler(State(db_state): State<Arc<DbPool>>) -
     let mut connection = db_state.get().unwrap();
     let provider = get_provider().await.expect("Failed to get provider");
     let previous_nonces = get_previous_values(&provider, U256::from(1)).await.unwrap();
-    update_payload(&mut connection, previous_nonces.into()).await;
+    let _ = update_payload(&mut connection, previous_nonces.into()).await;
 
     (
         StatusCode::OK,
@@ -474,6 +474,7 @@ async fn update_payload(
                 }
             }
         });
+    println!("Updated payloads as verified");
 }
 
 
