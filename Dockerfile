@@ -12,6 +12,4 @@ RUN curl -L https://sp1up.succinct.xyz | bash && \
 RUN cargo clean && \
     cargo build --release 
 
-RUN cargo install diesel_cli --no-default-features --features postgres
-
-CMD ["sh", "-c", "diesel migration run --database-url $DATABASE_URL && /app/target/release/node"]
+CMD ["/app/target/release/node"]

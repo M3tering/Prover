@@ -110,7 +110,7 @@ async fn main() {
                         "SELECT *
                         FROM m3ter_payloads
                         WHERE is_verified = FALSE
-                        LIMIT 1000",
+                        ",
                     )
                     .load::<M3terPayload>(&mut conn)
                     .expect("Failed to load payloads");
