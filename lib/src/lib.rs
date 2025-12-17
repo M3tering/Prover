@@ -4,7 +4,6 @@ use alloy_primitives::{Bytes, B256, U256};
 use alloy_sol_types::sol;
 use alloy_trie::Nibbles;
 use ed25519_dalek::VerifyingKey;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod util;
@@ -12,7 +11,7 @@ use util::validate_signature;
 
 pub use util::{
     calc_slot_key, decode_slice, destructure_payload, extract_nonce, get_state_root, to_b256,
-    to_keccak_hash, to_u256, trim_zeros, verify_account_proof
+    to_keccak_hash, to_u256, trim_zeros, verify_account_proof,
 };
 
 sol! {
@@ -197,46 +196,33 @@ pub fn track_energy(
     }
 
     let verifying_key = util::build_verifying_key(&m3ter.public_key).unwrap();
+    let mut nonce = start_nonce;
+    let mut energy_sum = 0u64;
+    for payload in m3ter_payloads {
+        println!("nonce {}, payload nonce {}", nonce, payload.nonce);
+        if !m3ter.validate_payload(payload, verifying_key) {
+            println!("Invalid payload: {:?}", payload);
+            break;
+        };
+        if nonce + 1 != payload.nonce {
+            println!(
+                "Invalid nonce: {} not consercutive to {} for m3ter_id {}",
+                &nonce, &payload.nonce, &m3ter.m3ter_id
+            );
+            nonce = if nonce < payload.nonce {
+                nonce
+            } else {
+                payload.nonce
+            };
+            break;
+        }
+        nonce = payload.nonce;
+        energy_sum += payload.energy;
+        println!(
+            "State: energy {:?}, nonce {:?}",
+            payload.energy, payload.nonce
+        );
+    }
 
-    // let mut energy_sum = 0;
-    // let mut latest_nonce = start_nonce;
-    m3ter_payloads
-        .par_iter()
-        .fold(
-            || (0, start_nonce),
-            |(energy, nonce), payload| {
-                println!("nonce {}, payload nonce {}", nonce, payload.nonce);
-                if !m3ter.validate_payload(payload, verifying_key) {
-                    println!("Invalid payload: {:?}", payload);
-                    return (energy, nonce);
-                };
-                if nonce + 1 != payload.nonce {
-                    println!(
-                        "Invalid nonce: {} not consercutive to {} for m3ter_id {}",
-                        &nonce, &payload.nonce, &m3ter.m3ter_id
-                    );
-                    return (
-                        energy,
-                        if nonce < payload.nonce {
-                            payload.nonce
-                        } else {
-                            nonce
-                        },
-                    );
-                } 
-                let energy_sum = energy + payload.energy;
-                println!(
-                    "State: energy {:?}, nonce {:?}",
-                    payload.energy, payload.nonce
-                );
-                (energy_sum, payload.nonce)
-            },
-        )
-        .reduce(
-            || (0, 0),
-            |a, b| {
-                println!("Reducing: {:?} + {:?}", a.0, b.0);
-                if a.0 != 0 || b.0 != 0 { (a.0 + b.0, a.1.max(b.1)) } else { (0, start_nonce) }
-            },
-        )
+    (energy_sum, nonce)
 }

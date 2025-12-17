@@ -26,8 +26,8 @@ fn get_rollup_address() -> Address {
         .expect("Invalid address")
 }
 
-fn get_m3ter_address() -> Address {
-    "0x40a36C0eF29A49D1B1c1fA45fab63762f8FC423F"
+pub fn get_m3ter_address() -> Address {
+    "0x9C547B649475f1bE81323AefdbcF209C17961D5E"
         .parse()
         .expect("Invalid address")
 }
@@ -139,6 +139,18 @@ pub async fn get_anchor_block_hash(provider: &impl Provider) -> Result<B256> {
 
     let anchor_hash = B256::from_slice(result[0].as_fixed_bytes().unwrap().0);
     Ok(anchor_hash)
+}
+
+pub async fn get_storage_at(
+    provider: &impl Provider,
+    address: Address,
+    slot: U256,
+) -> Result<U256> {
+    let storage_value = provider
+        .get_storage_at(address, slot)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to get storage at: {}", e))?;
+    Ok(storage_value)
 }
 
 pub async fn get_storage_proofs(

@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS m3ter_payloads (
     m3ter_id BIGINT NOT NULL,
     nonce BIGINT NOT NULL,
     energy BIGINT NOT NULL,
+    message VARCHAR NOT NULL,
     signature VARCHAR NOT NULL,
     is_verified BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
