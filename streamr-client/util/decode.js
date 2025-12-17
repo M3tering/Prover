@@ -1,18 +1,19 @@
 
-function decodePayload(buf) {
+function decodePayload(msg) {
+   const buf = Buffer.from(msg, 'hex');
    if (buf.length < 72) {
       throw new Error("Payload too short. Must be at least 72 bytes");
    }
    const nonce = buf.readUInt32BE(0);
+   const energy = buf.readUInt32BE(4);
 
-   const rawEnergy = buf.readUInt32BE(4);
-   const energyKWh = rawEnergy / 1e6;
-
+   const message = buf.subarray(0, 8).toString("hex");
    const signature = buf.subarray(8, 72).toString("hex");
 
    return {
       nonce,
-      energy: energyKWh,
+      energy,
+      message,
       signature,
    };
 }
@@ -20,3 +21,6 @@ function decodePayload(buf) {
 module.exports = {
    decodePayload,
 };
+
+
+

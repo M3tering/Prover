@@ -10,7 +10,7 @@ use energy_tracker_lib::{
 
 pub fn main() {
     let payload = sp1_zkvm::io::read::<Payload>();
-    let address = "40a36C0eF29A49D1B1c1fA45fab63762f8FC423F";
+    let address = "9C547B649475f1bE81323AefdbcF209C17961D5E";
 
     let mempool = payload.mempool;
     let initial_nonces = payload.previous_nonces;

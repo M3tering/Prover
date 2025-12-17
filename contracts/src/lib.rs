@@ -26,8 +26,8 @@ fn get_rollup_address() -> Address {
         .expect("Invalid address")
 }
 
-fn get_m3ter_address() -> Address {
-    "0x40a36C0eF29A49D1B1c1fA45fab63762f8FC423F"
+pub fn get_m3ter_address() -> Address {
+    "0x9C547B649475f1bE81323AefdbcF209C17961D5E"
         .parse()
         .expect("Invalid address")
 }

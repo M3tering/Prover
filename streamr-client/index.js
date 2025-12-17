@@ -1,5 +1,6 @@
 
 const express = require('express')
+const events = require('events')
 const dotenv = require('dotenv')
 
 dotenv.config()
@@ -25,7 +26,9 @@ async function initializeDatabase() {
     return db
 }
 
-initializeDatabase().then(db => {
+initializeDatabase().then(async db => {
+
+    events.setMaxListeners(20)
     const app = express()
     const port = process.env.PORT || 3000
 
@@ -33,18 +36,32 @@ initializeDatabase().then(db => {
         res.send('Hello World!')
     })
 
-    streamr.subscribe(STREAM_ID, data => {
-       console.log("📥 Received message:", data)
-
-       // Type guard to ensure data is a StreamrMessage
+    let sub = await streamr.subscribe(STREAM_ID, data => {
        if (
           data &&
-          typeof data === "array"
+          Array.isArray(data)
        ) {
           saveGossipMessage(db, data)
        } else {
           console.warn("⚠️ Received invalid message format:", data)
        }
+    })
+
+    console.log(`Subscribed to stream: ${sub.streamPartId}`)
+
+    sub.on('error', (err) => {
+        console.error('Subscription error:', err)
+    })
+
+    // Clean up subscription on process exit
+    process.on('SIGINT', async () => {
+        try {
+            await sub.unsubscribe()
+            process.exit(0)
+        } catch (err) {
+            console.error('Error during cleanup:', err)
+            process.exit(1)
+        }
     })
 
     app.listen(port, () => {

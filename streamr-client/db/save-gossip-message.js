@@ -2,33 +2,33 @@
 const pgp = require('pg-promise')()
 const decodePayload = require('../util/decode').decodePayload
 
-async function saveGossipMessage(db, message) {
-   const cs = new pgp.helpers.ColumnSet(['m3ter_id', 'nonce', 'energy', 'signature', 'is_verified'], { table: 'm3ter_payloads' });
+async function saveGossipMessage(db, messages) {
+   console.log("Received messages to save:", messages);
+   const cs = new pgp.helpers.ColumnSet([
+      'm3ter_id', 'nonce', 'energy', 'message', 'signature', 'is_verified'], 
+      { table: 'm3ter_payloads' }
+   );
 
-   const existing = await db.manyOrNone(
-      'SELECT m3ter_id, nonce FROM m3ter_payloads WHERE (m3ter_id, nonce) IN ($1:list)',
-      [message.map(msg => {
-         const { nonce } = decodePayload(msg.payload);
-         return `(${msg.m3terId},${nonce})`;
-      })]
-   );
-   const existingSet = new Set(
-      existing.map(e => `${e.m3ter_id}-${e.nonce}`)
-   );
-   const values = message
-      .map(msg => {
-         const { nonce, energy, signature } = decodePayload(msg.payload);
-         const key = `${msg.m3terId}-${nonce}`;
-         return existingSet.has(key) ? null : {
-            m3ter_id: msg.m3terId,
+   const mapped = await Promise.all(messages
+      .map(async msg => {
+         const { nonce, energy, message, signature } = decodePayload(msg.message);
+         const exist = await db.oneOrNone(
+            'SELECT id FROM m3ter_payloads WHERE m3ter_id = $1 AND nonce = $2',
+            [msg.m3ter_id, nonce]
+         );
+         if (exist) return null     
+
+         return {
+            m3ter_id: msg.m3ter_id,
             nonce,
             energy,
+            message,
             signature,
             is_verified: false
          };
-      })
-      .filter(Boolean); // Remove null values
-
+      }))
+   const values = mapped.filter(Boolean)
+      
    if (values.length === 0) {
       console.log("No new messages to save");
       return;

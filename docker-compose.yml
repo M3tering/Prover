@@ -36,6 +36,19 @@ services:
     image: energy-tracker.public.dappnode.eth:0.1.0
     restart: unless-stopped
 
+  streamr-client: 
+    build:
+      context: ./streamr-client
+    ports:
+      - 3000:3000
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:m3tering@db:5432/m3tering-db}
+    depends_on:
+      db:
+        condition: service_healthy
+    image: streamr-client.public.dappnode.eth:0.1.0
+    restart: unless-stopped
+
 volumes:
   db-data:
 # secrets:
