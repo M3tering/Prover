@@ -4,13 +4,13 @@ FROM node:20-alpine
 WORKDIR /usr/src/app
 
 # Install build deps (git for private deps) and runtime deps
-RUN apk add --no-cache git
+RUN apk add --no-cache cmake make g++ python3  py3-setuptools openssl-dev
 
 # Copy package files first to leverage layer caching
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm install --only=production
 
 # Copy app sources
 COPY . .
