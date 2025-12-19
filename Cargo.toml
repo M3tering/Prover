@@ -3,6 +3,12 @@ members = ["lib", "program", "contracts", "node"]
 default-members = ["node"]
 resolver = "2"
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 alloy-sol-types = "1.0.0"
