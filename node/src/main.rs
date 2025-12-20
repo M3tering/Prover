@@ -106,7 +106,7 @@ async fn main() {
                         ",
                     )
                     .load::<M3terPayload>(&mut conn)
-                    .expect("Failed to load payloads");
+                    .expect("Failed to load payloads"); 
                     if proving_payload.is_empty() {
                         println!("No new payloads to process");
                         continue;
