@@ -91,7 +91,7 @@ async fn main() {
     println!("connected to database");
 
     tokio::spawn(async move {
-        let duration = env::var("BLOCK_INTERVAL").unwrap()
+        let duration = env::var("BLOCK_INTERVAL").unwrap_or_else(|_| String::from("10000"))
             .parse::<u64>()
             .unwrap_or(3000);
         let mut interval = time::interval(Duration::from_secs(duration));
