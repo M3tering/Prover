@@ -17,6 +17,7 @@ pgo-data.profdata
 
 # Env
 **/.env
+.env.prebuilt
 
 # DIESEL files
 schema.rs

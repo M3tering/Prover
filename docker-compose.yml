@@ -1,13 +1,7 @@
-
-# You must create `db/password.txt` and add
-# a password of your choosing to it before running `docker compose up`.
-
 services:
   db:
     image: postgres:15
     restart: always
-    # secrets:
-    #   - db-password
     volumes:
       - db-data:/var/lib/postgresql/data
     environment:
@@ -21,10 +15,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
- 
   energy-tracker:
-    build:
-      context: .
+    image: ghcr.io/m3tering/prover:main
     ports:
       - 8080:8080
     environment:
@@ -37,10 +29,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    image: energy-tracker.public.dappnode.eth:0.1.0
     restart: unless-stopped
-
-  streamr-client: 
+  streamr-client:
     build:
       context: ./streamr-client
     ports:
@@ -55,6 +45,5 @@ services:
         condition: service_healthy
     image: streamr-client.public.dappnode.eth:0.1.0
     restart: unless-stopped
-
 volumes:
   db-data:
