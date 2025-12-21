@@ -24,6 +24,40 @@ Run the setup script from your terminal:
 bash <(curl -sSL https://raw.githubusercontent.com/M3tering/Prover/refs/tags/v0.1.0-sepolia/setup.sh)
 ```
 
+## Docker Setup
+
+This setup route using the prebuilt `prover` images.
+
+- Clone the repository
+
+```sh
+git clone https://github.com/M3tering/Prover.git
+```
+
+```sh
+cd Prover
+```
+
+- Set up environment variables
+
+```sh
+cp .env.prebuilt.example .env
+```
+
+> Make sure you set all the variables in the `.env` file
+
+- Start the docker containers
+
+```sh
+docker compose -f docker-compose-prebuilt.yml --env-file .env up --build -d
+```
+
+- See Logs
+
+```sh
+docker compose logs
+```
+
 ## AWS Setup
 
 For automated deployment on AWS EC2 or similar Linux servers, use the provided `setup-aws.sh` script. This script:
