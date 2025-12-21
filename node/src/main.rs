@@ -93,7 +93,7 @@ async fn main() {
     tokio::spawn(async move {
         let duration = env::var("BLOCK_INTERVAL").unwrap_or_else(|_| String::from("10000"))
             .parse::<u64>()
-            .unwrap_or(3000);
+            .unwrap_or(10000);
         let mut interval = time::interval(Duration::from_secs(duration));
         loop {
             interval.tick().await;
