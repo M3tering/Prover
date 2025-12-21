@@ -91,9 +91,9 @@ async fn main() {
     println!("connected to database");
 
     tokio::spawn(async move {
-        let duration = env::var("BLOCK_INTERVAL").unwrap()
+        let duration = env::var("BLOCK_INTERVAL").unwrap_or_else(|_| String::from("10000"))
             .parse::<u64>()
-            .unwrap_or(3000);
+            .unwrap_or(10000);
         let mut interval = time::interval(Duration::from_secs(duration));
         loop {
             interval.tick().await;
@@ -106,7 +106,7 @@ async fn main() {
                         ",
                     )
                     .load::<M3terPayload>(&mut conn)
-                    .expect("Failed to load payloads");
+                    .expect("Failed to load payloads"); 
                     if proving_payload.is_empty() {
                         println!("No new payloads to process");
                         continue;
