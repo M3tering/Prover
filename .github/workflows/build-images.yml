@@ -8,8 +8,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  PROVER_IMAGE_NAME: ${{ github.repository }}
-  STREAMR_IMAGE_NAME: ${{ github.repository }}/streamr-client
 
 jobs:
   build-and-push-images:
@@ -24,9 +22,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Normalize image names
+        run: |
+          echo "PROVER_IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+          echo "STREAMR_IMAGE_NAME=${GITHUB_REPOSITORY,,}/streamr-client" >> $GITHUB_ENV
+
       # Free up ~15-30 GB by removing unused pre-installed tools/packages
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main  # Reliable community action (or endersonmenezes/free-disk-space@v3)
+        uses: jlumbroso/free-disk-space@main 
         with:
           tool-cache: true
           android: true
@@ -62,6 +65,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.PROVER_IMAGE_NAME }}
 
       - name: Build and push Prover image
+        id: docker_build_prover
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -88,6 +92,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.STREAMR_IMAGE_NAME }}
 
       - name: Build and push Streamr client image
+        id: docker_build_streamr
         uses: docker/build-push-action@v6
         with:
           context: ./streamr-client
