@@ -200,22 +200,21 @@ pub fn track_energy(
     let mut energy_sum = 0u64;
     for payload in m3ter_payloads {
         println!("nonce {}, payload nonce {}", nonce, payload.nonce);
-        if !m3ter.validate_payload(payload, verifying_key) {
-            println!("Invalid payload: {:?}", payload);
-            break;
-        };
+        if nonce >= payload.nonce {
+            continue;
+        }
         if nonce + 1 != payload.nonce {
             println!(
                 "Invalid nonce: {} not consercutive to {} for m3ter_id {}",
                 &nonce, &payload.nonce, &m3ter.m3ter_id
             );
-            nonce = if nonce < payload.nonce {
-                nonce
-            } else {
-                payload.nonce
-            };
             break;
         }
+        if !m3ter.validate_payload(payload, verifying_key) {
+            println!("Invalid payload: {:?}", payload);
+            break;
+        };
+        
         nonce = payload.nonce;
         energy_sum += payload.energy;
         println!(
