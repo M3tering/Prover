@@ -15,10 +15,14 @@ use diesel::{
     sql_query, table,
 };
 
-use energy_tracker_lib::{Payload, ProofStruct, PublicValuesStruct, calc_slot_key, decode_slice, to_b256};
-use energy_tracker_verifier::{
-    commit_state, get_block_rpl_bytes, get_previous_values, get_provider, get_storage_proofs,
+use energy_tracker_lib::{
+    Payload, ProofStruct, PublicValuesStruct, calc_slot_key, decode_slice, to_b256,
 };
+use energy_tracker_verifier::{
+    check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values, get_provider,
+    get_storage_proofs,
+};
+use eyre::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sp1_sdk::{
@@ -106,7 +110,7 @@ async fn main() {
                         ",
                     )
                     .load::<M3terPayload>(&mut conn)
-                    .expect("Failed to load payloads"); 
+                    .expect("Failed to load payloads");
                     if proving_payload.is_empty() {
                         println!("No new payloads to process");
                         continue;
@@ -123,18 +127,21 @@ async fn main() {
                                 payload.energy as u64,
                             ));
                     }
-                    let (result, error) = run_prover(grouped, "groth16").await;
-
-                    if let Some((proof_fixture, hash)) = result {
-                        println!("Committed state with tx hash: {}", hash);
-                        update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
-                        println!("Updated payloads as verified");
-                    } else {
-                        println!("running prove failed. error {:?}", error.unwrap())
-                    }
-                }
+                    
+                    let (proof_fixture, hash) = match run_prover(grouped, "groth16").await {
+                        Ok(res) => res,
+                        Err(e) => {
+                            eprintln!("Prover error: {}", e);
+                            return;
+                        }
+                    };
+                    println!("Committed state with tx hash: {}", hash);
+                    update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
+                    println!("Updated payloads as verified");
+                },
                 Err(e) => {
-                    println!("encountered error {:?}", e);
+                    eprintln!("Failed to get DB connection: {:?}", e);
+                    break;
                 }
             }
         }
@@ -204,7 +211,7 @@ async fn run_prover_handler(
         }
     };
 
-     tokio::spawn(async move {
+    tokio::spawn(async move {
         let proving_payload = match sql_query(
             "SELECT *
                 FROM m3ter_payloads
@@ -239,23 +246,16 @@ async fn run_prover_handler(
                 ));
         }
 
-        let (result, error) = run_prover(grouped, &proof_type).await;
-
-        if let Some(err) = error {
-            eprintln!("Prover error: {}", err);
-            return;
-        }
-
-        match result {
-            Some((proof_fixture, hash)) => {
-                println!("Committed state with tx hash: {}", hash);
-                update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
-                println!("Updated payloads as verified");
+        let (proof_fixture, hash) = match run_prover(grouped, &proof_type).await {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("Prover error: {}", e);
+                return;
             }
-            None => {
-                eprintln!("Failed to generate proof");
-            }
-        }
+        };
+        println!("Committed state with tx hash: {}", hash);
+        update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
+        println!("Updated payloads as verified");
     });
 
     (
@@ -295,24 +295,26 @@ async fn update_verified_payloads_handler(
 async fn run_prover(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
     proof_type: &str,
-) -> (Option<(ProofFixture, String)>, Option<String>) {
-    let (payload, _) = build_proving_payload(payload).await;
-
+) -> Result<(ProofFixture, String)> {
     sp1_sdk::utils::setup_logger();
-
-    let mut stdin = SP1Stdin::new();
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
     let rpc_url = env::var("NETWORK_RPC_URL").expect("RPC_URL not set in .env");
-    stdin.write(&payload);
     let prover_client = ProverClient::builder()
         .network()
         .private_key(&private_key)
         .rpc_url(&rpc_url)
-        // .cpu()
-        // .cuda()
         .build();
 
     let (pk, vk) = prover_client.setup(ENERGY_TRACKER_ELF);
+
+    let (payload, _) = match build_proving_payload(payload, &vk).await {
+        Ok(res) => res,
+        Err(e) => return Err(eyre::eyre!("Failed to build payload: {:?}", e)),
+    };
+
+    let mut stdin = SP1Stdin::new();
+    stdin.write(&payload);
+
     let proof = match match proof_type {
         "plonk" => {
             prover_client
@@ -334,7 +336,7 @@ async fn run_prover(
         _ => panic!("Unsupported proof type: {}", proof_type),
     } {
         Ok(proof) => proof,
-        Err(e) => return (None, Some(format!("Prover error: {:?}", e))),
+        Err(e) => return Err(eyre::eyre!("Prover error: {:?}", e)),
     };
 
     let proof_fixture = create_proof_fixture(&proof, &vk);
@@ -350,13 +352,24 @@ async fn run_prover(
     .await
     .expect("msg: Failed to commit state");
 
-    (Some((proof_fixture, hash.to_string())), None)
+    Ok((proof_fixture, hash.to_string()))
 }
 
 async fn build_proving_payload(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
-) -> (Payload, B256) {
+    vk: &SP1VerifyingKey,
+) -> Result<(Payload, B256)> {
     let provider = get_provider().await.expect("Failed to get provider");
+
+    if !check_program_vkey(&provider, vk.bytes32_raw())
+        .await
+        .unwrap()
+    {
+        return Err(eyre::eyre!(
+            "Program Vkey does not match the on-chain value"
+        ));
+    }
+
     let previous_nonces = get_previous_values(&provider, U256::from(1)).await.unwrap();
     let previous_balances = get_previous_values(&provider, U256::from(0)).await.unwrap();
 
@@ -375,7 +388,7 @@ async fn build_proving_payload(
 
     println!("Loaded payloads: {:?}", payload);
     println!("Anchor Block: {:?}", anchor_block);
-    (
+    Ok((
         Payload {
             mempool: payload,
             previous_nonces: previous_nonces.into(),
@@ -389,7 +402,7 @@ async fn build_proving_payload(
             block_bytes: Some(block_bytes),
         },
         anchor_block,
-    )
+    ))
 }
 
 async fn update_payload(

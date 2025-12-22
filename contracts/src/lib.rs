@@ -99,6 +99,19 @@ fn get_rollup_abi() -> JsonAbi {
             "outputs": [],
             "stateMutability": "nonpayable",
             "type": "function"
+        },
+        {
+            "inputs":[],
+            "name":"SP1_PROGRAM_VKEY",
+            "outputs":[
+                {
+                    "internalType":"bytes32",
+                    "name":"",
+                    "type":"bytes32"
+                }
+            ],
+            "stateMutability":"view",
+            "type":"function"
         }
     ]"#;
 
@@ -252,4 +265,22 @@ pub async fn commit_state(
     let receipt = pending_tx.get_receipt().await?;
     println!("Transaction confirmed in block: {:?}", receipt.block_number);
     Ok(hash)
+}
+
+pub async fn check_program_vkey(provider: &impl Provider, vkey_hash: [u8; 32]) -> Result<bool> {
+    let rollup_address = get_rollup_address();
+    let abi: JsonAbi = get_rollup_abi();
+    let interface = Interface::new(abi);
+    let contract = interface.connect(rollup_address, provider);
+
+    let call_builder = contract.function(
+        "SP1_PROGRAM_VKEY",
+        &[],
+    )?;
+
+    let result = call_builder.call().await?;
+
+    let vkey = result[0].as_fixed_bytes().unwrap();
+    println!("on-chain vkey: {:?}, current vkey {:?}", vkey.0, vkey_hash);
+    Ok(vkey.0 == vkey_hash.as_slice())
 }

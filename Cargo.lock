@@ -4088,6 +4088,7 @@ dependencies = [
  "dotenvy",
  "energy-tracker-lib",
  "energy-tracker-verifier",
+ "eyre",
  "serde",
  "serde_json",
  "sp1-build",
