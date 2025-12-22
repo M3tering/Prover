@@ -31,8 +31,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   streamr-client:
-    build:
-      context: ./streamr-client
+    image: ghcr.io/m3tering/prover/streamr-client:main
     ports:
       - 3000:3000
     environment:
@@ -43,7 +42,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    image: streamr-client.public.dappnode.eth:0.1.0
     restart: unless-stopped
 volumes:
   db-data:
