@@ -68,8 +68,8 @@ class MigrationManager {
    async runMigrations() {
       await this.initialize()
 
-      // prevent concurrent migration runners
-      await this.db.none(
+      // acquire advisory lock (returns boolean)
+      await this.db.one(
          'SELECT pg_advisory_lock($1)',
          ADVISORY_LOCK_ID
       )
@@ -86,7 +86,8 @@ class MigrationManager {
             await this.applyMigration(file)
          }
       } finally {
-         await this.db.none(
+         // release advisory lock
+         await this.db.one(
             'SELECT pg_advisory_unlock($1)',
             ADVISORY_LOCK_ID
          )
