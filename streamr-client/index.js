@@ -32,8 +32,8 @@ initializeDatabase().then(async db => {
     const app = express()
     const port = process.env.PORT || 3000
 
-    app.get('/', res => {
-        res.send('Hello World!')
+    app.get('/health', res => {
+        res.status(200).json({ status: 'ok' })
     })
 
     let sub = await streamr.subscribe(STREAM_ID, data => {

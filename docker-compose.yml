@@ -1,9 +1,9 @@
 services:
   db:
-    image: postgres:15
+    image: postgres
     restart: always
-    volumes:
-      - db-data:/var/lib/postgresql/data
+    # set shared memory limit when using docker compose
+    shm_size: 128mb
     environment:
       - POSTGRES_DB=m3tering-db
       - POSTGRES_USER=${DB_USER:-postgres}
@@ -11,12 +11,28 @@ services:
     expose:
       - 5432
     healthcheck:
-      test: [ "CMD", "pg_isready" ]
+      test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
+      
+  streamr-client:
+    image: ghcr.io/m3tering/prover/streamr-client:main
+    restart: unless-stopped
+    ports:
+      - 3000:3000
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:m3tering@db:5432/m3tering-db}
+      - STREAM_ID=${STREAM_ID}
+      - PRIVATE_KEY=${PRIVATE_KEY}
+      - STREAMR_ENV=${STREAMR_ENV:-live}
+    depends_on:
+      db:
+        condition: service_healthy
+
   energy-tracker:
     image: ghcr.io/m3tering/prover:main
+    restart: unless-stopped
     ports:
       - 8080:8080
     environment:
@@ -29,19 +45,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    restart: unless-stopped
-  streamr-client:
-    image: ghcr.io/m3tering/prover/streamr-client:main
-    ports:
-      - 3000:3000
-    environment:
-      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:m3tering@db:5432/m3tering-db}
-      - STREAM_ID=${STREAM_ID}
-      - PRIVATE_KEY=${PRIVATE_KEY}
-      - STREAMR_ENV=${STREAMR_ENV:-live}
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
+
 volumes:
   db-data:
