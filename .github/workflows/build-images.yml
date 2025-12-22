@@ -3,8 +3,6 @@ name: Build and publish Docker images for Energy Tracker
 on:
   push:
     branches: [ "staging" ]
-  pull_request:
-    branches: [ "main" ]
 
 env:
   REGISTRY: ghcr.io
