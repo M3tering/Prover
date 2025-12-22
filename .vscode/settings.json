@@ -34,4 +34,10 @@
         "editor.formatOnSave": true,
         "editor.hover.enabled": "on"
     },
+    "cSpell.words": [
+        "buildcache",
+        "Buildx",
+        "imagetools",
+        "jlumbroso"
+    ],
 }
