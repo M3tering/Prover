@@ -281,6 +281,6 @@ pub async fn check_program_vkey(provider: &impl Provider, vkey_hash: [u8; 32]) -
     let result = call_builder.call().await?;
 
     let vkey = result[0].as_fixed_bytes().unwrap();
-    println!("on-chain vkey: {:?}, current vkey {:?}", hex::decode(vkey.0), hex::decode(vkey_hash));
+    println!("on-chain vkey: {:?}, current vkey {:?}", vkey.0, vkey_hash);
     Ok(vkey.0 == vkey_hash.as_slice())
 }
