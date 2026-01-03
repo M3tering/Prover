@@ -147,6 +147,9 @@ async fn main() {
         }
     });
 
+    let port = env::var("PROVER_NODE_PORT").unwrap_or_else(|_| "8080".to_string());
+    let addr = format!("127.0.0.1:{}", port);
+
     let app = Router::new()
         .route("/", get(root))
         .route("/health", get(health))
@@ -158,8 +161,8 @@ async fn main() {
         )
         .with_state(db_state);
 
-    println!("Starting server on http://localhost:8080");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
+    println!("Starting server on http://localhost:{}", port);
+    let listener = tokio::net::TcpListener::bind(addr)
         .await
         .unwrap();
     axum::serve::serve(listener, app)
