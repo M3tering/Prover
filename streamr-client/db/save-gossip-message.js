@@ -3,7 +3,7 @@ const pgp = require('pg-promise')()
 const decodePayload = require('../util/decode').decodePayload
 
 async function saveGossipMessage(db, messages) {
-   console.log("Received messages to save:", messages);
+   console.log("Received messages to save:", JSON.stringify(messages));
    const cs = new pgp.helpers.ColumnSet([
       'm3ter_id', 'nonce', 'energy', 'message', 'signature', 'is_verified'], 
       { table: 'm3ter_payloads' }
