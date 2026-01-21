@@ -19,8 +19,7 @@ use energy_tracker_lib::{
     Payload, ProofStruct, PublicValuesStruct, calc_slot_key, decode_slice, to_b256,
 };
 use energy_tracker_verifier::{
-    check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values, get_provider,
-    get_storage_proofs,
+    check_gas_balance, check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values, get_provider, get_storage_proofs
 };
 use eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -300,8 +299,13 @@ async fn run_prover(
     proof_type: &str,
 ) -> Result<(ProofFixture, String)> {
     sp1_sdk::utils::setup_logger();
+    let provider = get_provider().await.unwrap();
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
     let rpc_url = env::var("NETWORK_RPC_URL").expect("RPC_URL not set in .env");
+    if !check_gas_balance(&provider).await.unwrap() {
+        println!("Insufficient gas balance to proceed with proving.");
+        return Err(eyre::eyre!("Insufficient gas balance"));
+    }
     let prover_client = ProverClient::builder()
         .network()
         .private_key(&private_key)
@@ -346,14 +350,16 @@ async fn run_prover(
     println!("Proof generated successfully proof = {:?}", &proof_fixture);
 
     println!("Committing state ...");
-    let hash = commit_state(
-        &get_provider().await.unwrap(),
+    let hash = match commit_state(
+        &provider,
         &proof_fixture.new_balances,
         &proof_fixture.new_nonces,
         &proof_fixture.proof,
     )
-    .await
-    .expect("msg: Failed to commit state");
+    .await {
+        Ok(tx_hash) => tx_hash,
+        Err(e) => return Err(eyre::eyre!("Failed to commit state: {:?}", e)),
+    };
 
     Ok((proof_fixture, hash.to_string()))
 }
@@ -362,7 +368,10 @@ async fn build_proving_payload(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
     vk: &SP1VerifyingKey,
 ) -> Result<(Payload, B256)> {
-    let provider = get_provider().await.expect("Failed to get provider");
+    let provider = match get_provider().await {
+        Ok(p) => p,
+        Err(e) => return Err(eyre::eyre!("Failed to get provider: {:?}", e)),
+    };
 
     if !check_program_vkey(&provider, vk.bytes32_raw())
         .await

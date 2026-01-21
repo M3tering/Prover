@@ -284,3 +284,9 @@ pub async fn check_program_vkey(provider: &impl Provider, vkey_hash: [u8; 32]) -
     println!("on-chain vkey: {:?}, current vkey {:?}", vkey.0, vkey_hash);
     Ok(vkey.0 == vkey_hash.as_slice())
 }
+
+pub async fn check_gas_balance(provider: &impl Provider) -> Result<bool> {
+    let address = "0x8ac5e3097a39e5e1412af04673085fc1026c0b57".parse::<Address>()?;
+    let balance = provider.get_balance(address).await?;
+    Ok(balance > U256::from(10000000000u64))
+}
