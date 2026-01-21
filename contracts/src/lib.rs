@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use alloy::{
     dyn_abi::DynSolValue,
-    hex, json_abi::JsonAbi,
+    hex,
+    json_abi::JsonAbi,
     primitives::{Address, Bytes, B256, U256},
     providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
@@ -273,10 +274,7 @@ pub async fn check_program_vkey(provider: &impl Provider, vkey_hash: [u8; 32]) -
     let interface = Interface::new(abi);
     let contract = interface.connect(rollup_address, provider);
 
-    let call_builder = contract.function(
-        "SP1_PROGRAM_VKEY",
-        &[],
-    )?;
+    let call_builder = contract.function("SP1_PROGRAM_VKEY", &[])?;
 
     let result = call_builder.call().await?;
 
