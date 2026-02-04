@@ -42,6 +42,8 @@ initializeDatabase().then(async db => {
           Array.isArray(data)
        ) {
           saveGossipMessage(db, data)
+       } else if (data) {
+            console.log("Received message:", data)
        } else {
           console.warn("⚠️ Received invalid message format:", data)
        }
