@@ -19,7 +19,8 @@ use energy_tracker_lib::{
     Payload, ProofStruct, PublicValuesStruct, calc_slot_key, decode_slice, to_b256,
 };
 use energy_tracker_verifier::{
-    check_gas_balance, check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values, get_provider, get_storage_proofs
+    check_gas_balance, check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values,
+    get_provider, get_storage_proofs,
 };
 use eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -94,7 +95,8 @@ async fn main() {
     println!("connected to database");
 
     tokio::spawn(async move {
-        let duration = env::var("BLOCK_INTERVAL").unwrap_or_else(|_| String::from("10000"))
+        let duration = env::var("BLOCK_INTERVAL")
+            .unwrap_or_else(|_| String::from("10000"))
             .parse::<u64>()
             .unwrap_or(10000);
         let mut interval = time::interval(Duration::from_secs(duration));
@@ -114,7 +116,8 @@ async fn main() {
                         println!("No new payloads to process");
                         continue;
                     }
-                    let mut grouped: HashMap<String, Vec<energy_tracker_lib::M3terPayload>> = HashMap::new();
+                    let mut grouped: HashMap<String, Vec<energy_tracker_lib::M3terPayload>> =
+                        HashMap::new();
                     for payload in &proving_payload {
                         grouped
                             .entry(payload.m3ter_id.to_string())
@@ -126,7 +129,7 @@ async fn main() {
                                 payload.energy as u64,
                             ));
                     }
-                    
+
                     let (proof_fixture, hash) = match run_prover(grouped, "groth16").await {
                         Ok(res) => res,
                         Err(e) => {
@@ -137,7 +140,7 @@ async fn main() {
                     println!("Committed state with tx hash: {}", hash);
                     update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
                     println!("Updated payloads as verified");
-                },
+                }
                 Err(e) => {
                     eprintln!("Failed to get DB connection: {:?}", e);
                     break;
@@ -147,7 +150,7 @@ async fn main() {
     });
 
     let port = env::var("PROVER_NODE_PORT").unwrap_or_else(|_| "8080".to_string());
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("0.0.0.0:{}", port);
 
     let app = Router::new()
         .route("/", get(root))
@@ -161,9 +164,7 @@ async fn main() {
         .with_state(db_state);
 
     println!("Starting server on http://localhost:{}", port);
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve::serve(listener, app)
         .await
         .expect("server should start");
@@ -356,7 +357,8 @@ async fn run_prover(
         &proof_fixture.new_nonces,
         &proof_fixture.proof,
     )
-    .await {
+    .await
+    {
         Ok(tx_hash) => tx_hash,
         Err(e) => return Err(eyre::eyre!("Failed to commit state: {:?}", e)),
     };
