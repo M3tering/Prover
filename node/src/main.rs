@@ -106,8 +106,9 @@ async fn main() {
                 Ok(mut conn) => {
                     let proving_payload = sql_query(
                         "SELECT *
-                        FROM m3ter_payloads
-                        WHERE is_verified = FALSE
+                            FROM m3ter_payloads
+                            WHERE is_verified = FALSE
+                            ORDER BY m3ter_id ASC, nonce ASC
                         ",
                     )
                     .load::<M3terPayload>(&mut conn)
