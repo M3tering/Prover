@@ -6,7 +6,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::Json,
-    routing::get,
+    routing::{get, post},
 };
 use diesel::{
     PgConnection, RunQueryDsl,
@@ -16,7 +16,7 @@ use diesel::{
 };
 
 use energy_tracker_lib::{
-    Payload, ProofStruct, PublicValuesStruct, calc_slot_key, decode_slice, to_b256,
+    Payload, ProofStruct, PublicValuesStruct, calc_slot_key, decode_slice, destructure_payload, extract_nonce, to_b256
 };
 use energy_tracker_verifier::{
     check_gas_balance, check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values,
@@ -24,7 +24,7 @@ use energy_tracker_verifier::{
 };
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use sp1_sdk::{
     HashableKey, Prover, ProverClient, SP1ProofWithPublicValues, SP1Stdin, SP1VerifyingKey,
     include_elf, network::FulfillmentStrategy,
@@ -156,6 +156,7 @@ async fn main() {
         .route("/", get(root))
         .route("/health", get(health))
         .route("/run_prover", get(run_prover_handler))
+        .route("/batch-payloads", post(batch_payload_handler))
         .route("/vkey", get(get_prover_vkey))
         .route(
             "/update_verified_payloads",
@@ -276,6 +277,66 @@ async fn get_prover_vkey() -> Json<serde_json::Value> {
     Json(json!({
         "vkey": vk.bytes32()
     }))
+}
+
+async fn batch_payload_handler(
+    State(db_state): State<Arc<DbPool>>,
+    Json(payloads): Json<Vec<Value>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    struct PayloadItem {
+        pub m3ter_id: i64,
+        pub message: String,
+    }
+
+    impl From<Value> for PayloadItem {
+        fn from(value: Value) -> Self {
+            Self {
+                m3ter_id: value["m3ter_id"].as_i64().unwrap(),
+                message: String::from(value["message"].as_str().unwrap_or("")),
+            }
+        }
+    }
+    let mut connection = db_state.get().unwrap();
+    let received_count = payloads.len();
+
+    let new_payloads = payloads
+        .into_iter()
+        .map(PayloadItem::from)
+        .filter(|item| {
+            is_unique_nonce(
+                &mut connection,
+                item.m3ter_id,
+                extract_nonce(&item.message),
+            )
+            .expect("Failed to check uniqueness")
+        })
+        .map(|payload| {
+            let m3ter_id = payload.m3ter_id;
+            let (message, signature, nonce, energy) = destructure_payload(&payload.message);
+            NewM3terPayload {
+                m3ter_id,
+                message: message.to_string(),
+                signature: signature.to_string(),
+                nonce: nonce as i64,
+                energy: energy as i64,
+                is_verified: false,
+            }
+        })
+        .collect::<Vec<NewM3terPayload>>();
+
+    println!("Inserting payload");
+    let inserted: Vec<M3terPayload> = diesel::insert_into(m3ter_payloads::table)
+        .values(&new_payloads)
+        .get_results(&mut connection)
+        .expect("Failed to insert payload");
+
+    println!("Inserted payload: {:?}", inserted);
+    (
+        StatusCode::OK,
+        Json(
+            json!({ "inserted": inserted, "nonces_inserted": inserted.len(), "nonces_repeated": received_count - inserted.len() }),
+        ),
+    )
 }
 
 async fn update_verified_payloads_handler(
