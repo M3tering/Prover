@@ -308,7 +308,6 @@ async fn batch_payload_handler(
                 item.m3ter_id,
                 extract_nonce(&item.message),
             )
-            .expect("Failed to check uniqueness")
         })
         .map(|payload| {
             let m3ter_id = payload.m3ter_id;
@@ -525,6 +524,32 @@ async fn update_payload(
                 }
             }
         });
+}
+
+fn is_unique_nonce(
+    connection: &mut PooledConnection<ConnectionManager<PgConnection>>,
+    i_m3ter_id: i64,
+    i_nonce: i64,
+) -> bool {
+    use self::m3ter_payloads::dsl::*;
+    use diesel::prelude::*;
+
+    match m3ter_payloads
+        .filter(m3ter_id.eq(i_m3ter_id).and(nonce.eq(i_nonce)))
+        .first::<M3terPayload>(connection)
+    {
+        Ok(_) => {
+            println!(
+                "Nonce {} for m3ter {} already exists in the database",
+                i_nonce, i_m3ter_id
+            );
+            false
+        }
+        Err(_) => {
+            println!("Nonce {} for m3ter {} is unique", i_nonce, i_m3ter_id);
+            true
+        }
+    }
 }
 
 fn create_proof_fixture(proof: &SP1ProofWithPublicValues, vk: &SP1VerifyingKey) -> ProofFixture {
