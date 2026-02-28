@@ -155,9 +155,9 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(root))
+        .route("/", post(batch_payload_handler))
         .route("/health", get(health))
         .route("/run_prover", get(run_prover_handler))
-        .route("/batch-payloads", post(batch_payload_handler))
         .route("/vkey", get(get_prover_vkey))
         .route(
             "/update_verified_payloads",
