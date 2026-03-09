@@ -16,7 +16,8 @@ use diesel::{
 };
 
 use energy_tracker_lib::{
-    Payload, ProofStruct, PublicValuesStruct, calc_slot_key, decode_slice, destructure_payload, extract_nonce, to_b256
+    Payload, ProofStruct, PublicValuesStruct, calc_slot_key, decode_slice, destructure_payload,
+    extract_nonce, to_b256,
 };
 use energy_tracker_verifier::{
     check_gas_balance, check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values,
@@ -139,7 +140,7 @@ async fn main() {
                         }
                     };
                     println!("Committed state with tx hash: {}", hash);
-                    update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
+                    let _ = update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
                     println!("Updated payloads as verified");
                 }
                 Err(e) => {
@@ -259,7 +260,7 @@ async fn run_prover_handler(
             }
         };
         println!("Committed state with tx hash: {}", hash);
-        update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
+        let _ = update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
         println!("Updated payloads as verified");
     });
 
@@ -304,11 +305,7 @@ async fn batch_payload_handler(
         .into_iter()
         .map(PayloadItem::from)
         .filter(|item| {
-            is_unique_nonce(
-                &mut connection,
-                item.m3ter_id,
-                extract_nonce(&item.message),
-            )
+            is_unique_nonce(&mut connection, item.m3ter_id, extract_nonce(&item.message))
         })
         .map(|payload| {
             let m3ter_id = payload.m3ter_id;
@@ -483,7 +480,9 @@ async fn build_proving_payload(
 async fn update_payload(
     connection: &mut PooledConnection<ConnectionManager<PgConnection>>,
     nonces: Vec<u8>,
-) {
+) -> Result<()> {
+    use self::m3ter_payloads::dsl::*;
+    use diesel::prelude::*;
     enum DataStrategy {
         Persist,
         Delete,
@@ -493,38 +492,30 @@ async fn update_payload(
         "delete" => DataStrategy::Delete,
         _ => DataStrategy::Persist,
     };
-    nonces
-        .chunks_exact(6)
-        .enumerate()
-        .filter_map(|(i, nonce)| {
-            let nonce = decode_slice(nonce.try_into().ok()?);
-            if nonce != 0 {
-                Some((i, nonce as i64))
-            } else {
-                None
-            }
-        })
-        .for_each(|(i, nonce_filter)| {
-            use self::m3ter_payloads::dsl::*;
-            use diesel::prelude::*;
-            match strategy {
-                DataStrategy::Persist => {
-                    let _ = diesel::update(
-                        m3ter_payloads.filter(m3ter_id.eq(i as i64).and(nonce.le(nonce_filter))),
-                    )
-                    .set(is_verified.eq(true))
-                    .execute(connection)
-                    .expect("Failed to update payloads");
-                }
-                DataStrategy::Delete => {
-                    let _ = diesel::delete(
-                        m3ter_payloads.filter(m3ter_id.eq(i as i64).and(nonce.eq(nonce_filter))),
-                    )
-                    .execute(connection)
-                    .expect("Failed to delete payloads");
-                }
-            }
-        });
+    let nonces_in_db = m3ter_payloads
+        .select(m3ter_id)
+        .distinct()
+        .load::<i64>(connection)?;
+    nonces_in_db.iter().for_each(|m3ter| {
+        let n = *m3ter as usize;
+        let start = n * 6;
+        let end = n * 6 + 6;
+        let nonce_value = decode_slice(&nonces[start..end].try_into().unwrap()) as i64;
+        let rows = match strategy {
+            DataStrategy::Persist => diesel::update(m3ter_payloads)
+                .filter(m3ter_id.eq(m3ter))
+                .filter(nonce.le(nonce_value))
+                .set(is_verified.eq(true))
+                .execute(connection),
+            DataStrategy::Delete => diesel::delete(m3ter_payloads)
+                .filter(m3ter_id.eq(m3ter))
+                .filter(nonce.le(nonce_value))
+                .execute(connection),
+        };
+
+        println!("rows updated {}", rows.unwrap_or_default());
+    });
+    Ok(())
 }
 
 fn is_unique_nonce(
