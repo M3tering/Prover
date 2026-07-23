@@ -27,13 +27,13 @@ use eyre::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sp1_sdk::{
-    HashableKey, Prover, ProverClient, SP1ProofWithPublicValues, SP1Stdin, SP1VerifyingKey,
-    include_elf, network::FulfillmentStrategy,
+    Elf, HashableKey, ProveRequest, Prover, ProverClient, ProvingKey, SP1ProofWithPublicValues, SP1Stdin, 
+    SP1VerifyingKey, include_elf, network::{FulfillmentStrategy, NetworkMode, signer::NetworkSigner}
 };
 use tokio::time::{self, Duration};
 
 /// The ELF (executable and linkable format) file for the Succinct RISC-V zkVM.
-pub const ENERGY_TRACKER_ELF: &[u8] = include_elf!("energy-tracker-program");
+pub const ENERGY_TRACKER_ELF: Elf = include_elf!("energy-tracker-program");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,7 +87,6 @@ table! {
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
-
     sp1_sdk::utils::setup_logger();
     // Define a simple route
     println!("connecting to database...");
@@ -141,7 +140,6 @@ async fn main() {
                     };
                     println!("Committed state with tx hash: {}", hash);
                     let _ = update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
-                    println!("Updated payloads as verified");
                 }
                 Err(e) => {
                     eprintln!("Failed to get DB connection: {:?}", e);
@@ -274,10 +272,10 @@ async fn run_prover_handler(
 }
 
 async fn get_prover_vkey() -> Json<serde_json::Value> {
-    let prover = ProverClient::builder().cpu().build();
-    let (_, vk) = prover.setup(ENERGY_TRACKER_ELF);
+    let prover = ProverClient::builder().cpu().build().await;
+    let pk = prover.setup(ENERGY_TRACKER_ELF).await.unwrap();
     Json(json!({
-        "vkey": vk.bytes32()
+        "vkey": pk.verifying_key().bytes32()
     }))
 }
 
@@ -360,20 +358,20 @@ async fn run_prover(
     sp1_sdk::utils::setup_logger();
     let provider = get_provider().await.unwrap();
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
-    let rpc_url = env::var("NETWORK_RPC_URL").expect("RPC_URL not set in .env");
+    let signer = NetworkSigner::local(&private_key).unwrap();
     if !check_gas_balance(&provider).await.unwrap() {
         println!("Insufficient gas balance to proceed with proving.");
         return Err(eyre::eyre!("Insufficient gas balance"));
     }
     let prover_client = ProverClient::builder()
-        .network()
-        .private_key(&private_key)
-        .rpc_url(&rpc_url)
-        .build();
+        .network_for(NetworkMode::Mainnet)
+        .signer(signer)
+        .build()
+        .await;
 
-    let (pk, vk) = prover_client.setup(ENERGY_TRACKER_ELF);
-
-    let (payload, _) = match build_proving_payload(payload, &vk).await {
+    let pk = prover_client.setup(ENERGY_TRACKER_ELF).await.unwrap();
+    let vk = pk.verifying_key();
+    let (payload, _) = match build_proving_payload(payload, vk).await {
         Ok(res) => res,
         Err(e) => return Err(eyre::eyre!("Failed to build payload: {:?}", e)),
     };
@@ -384,19 +382,17 @@ async fn run_prover(
     let proof = match match proof_type {
         "plonk" => {
             prover_client
-                .prove(&pk, &stdin)
+                .prove(&pk, stdin)
                 .strategy(FulfillmentStrategy::Auction)
                 .max_price_per_pgu(1u64)
                 .plonk()
-                .run_async()
                 .await
         }
         "groth16" => {
             prover_client
-                .prove(&pk, &stdin)
+                .prove(&pk, stdin)
                 .strategy(FulfillmentStrategy::Auction)
                 .groth16()
-                .run_async()
                 .await
         }
         _ => panic!("Unsupported proof type: {}", proof_type),
@@ -405,7 +401,7 @@ async fn run_prover(
         Err(e) => return Err(eyre::eyre!("Prover error: {:?}", e)),
     };
 
-    let proof_fixture = create_proof_fixture(&proof, &vk);
+    let proof_fixture = create_proof_fixture(&proof, vk);
     println!("Proof generated successfully proof = {:?}", &proof_fixture);
 
     println!("Committing state ...");
@@ -483,6 +479,7 @@ async fn update_payload(
 ) -> Result<()> {
     use self::m3ter_payloads::dsl::*;
     use diesel::prelude::*;
+    #[derive(Debug)]
     enum DataStrategy {
         Persist,
         Delete,
@@ -513,7 +510,7 @@ async fn update_payload(
                 .execute(connection),
         };
 
-        println!("rows updated {}", rows.unwrap_or_default());
+        println!("rows updated {} with strategy {:?}", rows.unwrap_or_default(), strategy);
     });
     Ok(())
 }

@@ -2,17 +2,17 @@ FROM rust:1.86 AS builder
 
 RUN apt-get update && apt-get install -y \
     clang mold \
-    libpq-dev libssl-dev pkg-config libssl3 libpq5 \
-    && rm -rf /var/lib/apt/lists/
+    libpq-dev libssl-dev pkg-config libssl3 libpq5 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/root/.sp1/bin:${PATH}"
 
 WORKDIR /app
 
-RUN curl -L https://sp1up.succinct.xyz | bash && \
-    export PATH="$HOME/.sp1/bin:$PATH" && \
-    sp1up
+RUN curl -L https://sp1up.succinct.xyz | bash && sp1up
 
 COPY . .
-RUN cargo clean && cargo build --release 
+RUN cargo build --release
 
 FROM debian:bookworm-slim
 
