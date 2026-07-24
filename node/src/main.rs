@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sp1_sdk::{
     Elf, HashableKey, ProveRequest, Prover, ProverClient, ProvingKey, SP1ProofWithPublicValues, SP1Stdin, 
-    SP1VerifyingKey, include_elf, network::{FulfillmentStrategy, NetworkMode, signer::NetworkSigner}
+    SP1VerifyingKey, include_elf, network::{NetworkMode, signer::NetworkSigner}
 };
 use tokio::time::{self, Duration};
 
@@ -388,7 +388,6 @@ async fn run_prover(
         "plonk" => {
             prover_client
                 .prove(&pk, stdin)
-                .strategy(FulfillmentStrategy::Auction)
                 // .skip_simulation(true)
                 .max_price_per_pgu(1u64)
                 .plonk()
@@ -397,7 +396,6 @@ async fn run_prover(
         "groth16" => {
             prover_client
                 .prove(&pk, stdin)
-                .strategy(FulfillmentStrategy::Auction)
                 // .skip_simulation(true)
                 .max_price_per_pgu(1u64)
                 .groth16()
