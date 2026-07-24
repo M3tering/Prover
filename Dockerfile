@@ -13,7 +13,7 @@ WORKDIR /app
 RUN curl -L https://sp1up.succinct.xyz | bash && sp1up
 
 COPY . .
-RUN cargo build --release
+RUN cargo clean && cargo build --release
 
 FROM debian:bookworm-slim
 
