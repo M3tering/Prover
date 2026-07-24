@@ -13,19 +13,21 @@ pub fn main() {
     let address = "9C547B649475f1bE81323AefdbcF209C17961D5E";
 
     let mempool = payload.mempool;
-    let initial_nonces = payload.previous_nonces;
-    let initial_balances = payload.previous_balances;
+    let mut initial_nonces = payload.previous_nonces;
+    let mut initial_balances = payload.previous_balances;
 
-    let previous_nonces = if initial_nonces.len() == 2 {
-        vec![]
+    if initial_nonces.len() == 2 {
+        initial_nonces = vec![]
     } else {
-        initial_nonces[0..].to_vec()
+        initial_nonces = initial_nonces[0..].to_vec()
     };
-    let previous_balances = if initial_balances.len() == 2 {
-        vec![]
+    if initial_balances.len() == 2 {
+        initial_balances = vec![]
     } else {
-        initial_balances[0..].to_vec()
+        initial_balances = initial_balances[0..].to_vec()
     };
+    let previous_nonces = initial_nonces.to_owned();
+    let previous_balances = initial_balances.to_owned();
 
     let (account_proof, encoded_account, storage_hash, proofs) = match payload.proofs {
         Some(value) => (
@@ -119,7 +121,7 @@ pub fn main() {
             "Values after tracking = Energy Sum: {}, Latest Nonce: {}",
             energy_sum, latest_nonce
         );
-        
+
         let energy_sum = energy_sum + current_balance;
 
         let (nonce_encoded, nonce_status) = encode_slice(latest_nonce);
@@ -164,4 +166,3 @@ pub fn main() {
     };
     sp1_zkvm::io::commit_slice(&public_values.concat_bytes());
 }
-

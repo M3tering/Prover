@@ -3,11 +3,14 @@ version = "0.1.0"
 name = "energy-tracker-program"
 edition = "2021"
 
+[profile.release]
+overflow-checks = true
+
 [dependencies]
 alloy-sol-types = { workspace = true }
 serde = { workspace = true }
 hex = { workspace = true }
-sp1-zkvm = { version = "5.0.0", features = ["embedded"] }
+sp1-zkvm = { version = "6.3.1" }
 energy-tracker-lib = { path = "../lib" }
 rayon = "1.11.0"
 
