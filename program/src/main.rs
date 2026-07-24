@@ -2,6 +2,7 @@
 sp1_zkvm::entrypoint!(main);
 
 use core::panic;
+use std::println;
 
 use energy_tracker_lib::{
     calc_slot_key, get_state_root, to_b256, to_keccak_hash, to_u256, track_energy, trim_zeros,
@@ -11,7 +12,7 @@ use energy_tracker_lib::{
 pub fn main() {
     let payload = sp1_zkvm::io::read::<Payload>();
     let address = "9C547B649475f1bE81323AefdbcF209C17961D5E";
-
+    println!("===== starting progam execution ================");
     let mempool = payload.mempool;
     let mut initial_nonces = payload.previous_nonces;
     let mut initial_balances = payload.previous_balances;
@@ -28,7 +29,7 @@ pub fn main() {
     };
     let previous_nonces = initial_nonces.to_owned();
     let previous_balances = initial_balances.to_owned();
-
+    println!("======= destructuring values ===============");
     let (account_proof, encoded_account, storage_hash, proofs) = match payload.proofs {
         Some(value) => (
             value.account_proof,
@@ -44,6 +45,7 @@ pub fn main() {
         None => panic!("block bytes missing"),
     };
 
+    println!("======= verify account ===============");
     if !verify_account_proof(
         state_root,
         hex::decode(address).unwrap(),
@@ -81,6 +83,7 @@ pub fn main() {
     let mut new_nonces = previous_nonces.clone();
     let mut new_balances = previous_balances.clone();
 
+    println!("======= process values ===============");
     for (m3ter_key, m3ter_payloads) in mempool {
         let m3ter_id = m3ter_key.parse::<usize>().unwrap();
         let (public_key, proof) = match proofs.get(dbg!(&to_b256(

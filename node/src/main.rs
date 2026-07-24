@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sp1_sdk::{
     Elf, HashableKey, ProveRequest, Prover, ProverClient, ProvingKey, SP1ProofWithPublicValues, SP1Stdin, 
-    SP1VerifyingKey, include_elf, network::{NetworkMode, signer::NetworkSigner}
+    SP1VerifyingKey, include_elf, network::{NetworkMode, signer::NetworkSigner}, utils::setup_logger
 };
 use tokio::time::{self, Duration};
 
@@ -195,6 +195,7 @@ async fn run_prover_handler(
     State(db_state): State<Arc<DbPool>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    
     let proof_type = params
         .get("proof_type")
         .map(|s| {
@@ -356,7 +357,7 @@ async fn run_prover(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
     proof_type: &str,
 ) -> Result<(ProofFixture, String)> {
-    sp1_sdk::utils::setup_logger();
+    setup_logger();
     let provider = get_provider().await.unwrap();
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
     let signer = NetworkSigner::local(&private_key).unwrap();
@@ -379,11 +380,10 @@ async fn run_prover(
 
     let mut stdin = SP1Stdin::new();
     stdin.write(&payload);
-    // println!("====starting proof generation======");
+    println!("====starting proof generation======");
     // let (_, report) = prover_client.execute(ENERGY_TRACKER_ELF, stdin.clone()).await.unwrap();
     // println!("report {:?}", report);
-
-    println!("====starting proof generation======");
+    // println!("====starting proof generation======");
     let proof = match match proof_type {
         "plonk" => {
             prover_client
