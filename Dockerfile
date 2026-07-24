@@ -3,6 +3,7 @@ FROM rust:1.86 AS builder
 RUN apt-get update && apt-get install -y \
     clang mold \
     libpq-dev libssl-dev pkg-config libssl3 libpq5 curl \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/root/.sp1/bin:${PATH}"
