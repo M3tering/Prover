@@ -109,7 +109,7 @@ async fn main() {
                             FROM m3ter_payloads
                             WHERE is_verified = FALSE
                             ORDER BY m3ter_id ASC, nonce ASC
-                            Limit 1000
+                            Limit 10000
                         ",
                     )
                     .load::<M3terPayload>(&mut conn)
@@ -274,7 +274,10 @@ async fn run_prover_handler(
 }
 
 async fn get_prover_vkey() -> Json<serde_json::Value> {
-    let prover = ProverClient::builder().cpu().build().await;
+    let prover = ProverClient::builder()
+        .network_for(NetworkMode::Mainnet)
+        .build()
+        .await;
     let pk = prover.setup(ENERGY_TRACKER_ELF).await.unwrap();
     Json(json!({
         "vkey": pk.verifying_key().bytes32()
@@ -389,7 +392,6 @@ async fn run_prover(
             prover_client
                 .prove(&pk, stdin)
                 // .skip_simulation(true)
-                .max_price_per_pgu(1u64)
                 .plonk()
                 .await
         }
@@ -397,7 +399,6 @@ async fn run_prover(
             prover_client
                 .prove(&pk, stdin)
                 // .skip_simulation(true)
-                .max_price_per_pgu(1u64)
                 .groth16()
                 .await
         }
