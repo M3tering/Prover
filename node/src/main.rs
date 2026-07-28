@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, sync::Arc};
+use std::{collections::HashMap, env, sync::Arc, unimplemented};
 
 use alloy_primitives::{B256, Bytes, U256, hex};
 use axum::{
@@ -274,8 +274,10 @@ async fn run_prover_handler(
 }
 
 async fn get_prover_vkey() -> Json<serde_json::Value> {
+    let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
     let prover = ProverClient::builder()
         .network_for(NetworkMode::Mainnet)
+        .private_key(&private_key)
         .build()
         .await;
     let pk = prover.setup(ENERGY_TRACKER_ELF).await.unwrap();
@@ -369,8 +371,9 @@ async fn run_prover(
         return Err(eyre::eyre!("Insufficient gas balance"));
     }
     let prover_client = ProverClient::builder()
-        .network_for(NetworkMode::Mainnet)
-        .signer(signer)
+        .cpu()
+        // .network_for(NetworkMode::Mainnet)
+        // .signer(signer)
         .build()
         .await;
 
@@ -380,51 +383,51 @@ async fn run_prover(
         Ok(res) => res,
         Err(e) => return Err(eyre::eyre!("Failed to build payload: {:?}", e)),
     };
-
+    
     let mut stdin = SP1Stdin::new();
     stdin.write(&payload);
+    println!("====starting execution report======");
+    let (_, report) = prover_client.execute(ENERGY_TRACKER_ELF, stdin.clone()).await.unwrap();
+    println!("report {:?}", report);
     println!("====starting proof generation======");
-    // let (_, report) = prover_client.execute(ENERGY_TRACKER_ELF, stdin.clone()).await.unwrap();
-    // println!("report {:?}", report);
-    // println!("====starting proof generation======");
-    let proof = match match proof_type {
-        "plonk" => {
-            prover_client
-                .prove(&pk, stdin)
-                // .skip_simulation(true)
-                .plonk()
-                .await
-        }
-        "groth16" => {
-            prover_client
-                .prove(&pk, stdin)
-                // .skip_simulation(true)
-                .groth16()
-                .await
-        }
-        _ => panic!("Unsupported proof type: {}", proof_type),
-    } {
-        Ok(proof) => proof,
-        Err(e) => return Err(eyre::eyre!("Prover error: {:?}", e)),
-    };
+    // let proof = match match proof_type {
+    //     "plonk" => {
+    //         prover_client
+    //             .prove(&pk, stdin)
+    //             .skip_simulation(true)
+    //             .plonk()
+    //             .await
+    //     }
+    //     "groth16" => {
+    //         prover_client
+    //             .prove(&pk, stdin)
+    //             .skip_simulation(true)
+    //             .groth16()
+    //             .await
+    //     }
+    //     _ => panic!("Unsupported proof type: {}", proof_type),
+    // } {
+    //     Ok(proof) => proof,
+    //     Err(e) => return Err(eyre::eyre!("Prover error: {:?}", e)),
+    // };
 
-    let proof_fixture = create_proof_fixture(&proof, vk);
-    println!("Proof generated successfully proof = {:?}", &proof_fixture);
+    // let proof_fixture = create_proof_fixture(&proof, vk);
+    // println!("Proof generated successfully proof = {:?}", &proof_fixture);
 
-    println!("Committing state ...");
-    let hash = match commit_state(
-        &provider,
-        &proof_fixture.new_balances,
-        &proof_fixture.new_nonces,
-        &proof_fixture.proof,
-    )
-    .await
-    {
-        Ok(tx_hash) => tx_hash,
-        Err(e) => return Err(eyre::eyre!("Failed to commit state: {:?}", e)),
-    };
-
-    Ok((proof_fixture, hash.to_string()))
+    // println!("Committing state ...");
+    // let hash = match commit_state(
+    //     &provider,
+    //     &proof_fixture.new_balances,
+    //     &proof_fixture.new_nonces,
+    //     &proof_fixture.proof,
+    // )
+    // .await
+    // {
+    //     Ok(tx_hash) => tx_hash,
+    //     Err(e) => return Err(eyre::eyre!("Failed to commit state: {:?}", e)),
+    // };
+    unimplemented!("go back")
+    // Ok((proof_fixture, hash.to_string()))
 }
 
 async fn build_proving_payload(

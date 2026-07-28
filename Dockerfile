@@ -1,4 +1,4 @@
-FROM rust:1.86 AS builder
+FROM rust:1.97.1-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
     clang mold \
