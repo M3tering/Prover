@@ -5,9 +5,11 @@ use alloy::{
     hex,
     json_abi::JsonAbi,
     primitives::{Address, Bytes, B256, U256},
-    providers::{Provider, ProviderBuilder},
+    providers::{ProviderBuilder},
     signers::local::PrivateKeySigner,
 };
+
+pub use alloy::providers::Provider;
 
 use alloy_contract::Interface;
 use alloy_rlp::{encode, RlpEncodable};

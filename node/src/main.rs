@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, sync::Arc, unimplemented};
+use std::{collections::HashMap, env, println, sync::Arc, unimplemented};
 
 use alloy_primitives::{B256, Bytes, U256, hex};
 use axum::{
@@ -20,8 +20,7 @@ use energy_tracker_lib::{
     extract_nonce, to_b256,
 };
 use energy_tracker_verifier::{
-    check_gas_balance, check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values,
-    get_provider, get_storage_proofs,
+    Provider, check_gas_balance, check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values, get_provider, get_storage_proofs,
 };
 use eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -131,7 +130,10 @@ async fn main() {
                                 payload.energy as u64,
                             ));
                     }
-
+                    for (k, v) in &grouped {
+                        println!("m3ter {}, with payload length {}", k, v.len());
+                    }
+                    println!("========start running prover=============");
                     let (proof_fixture, hash) = match run_prover(grouped, "groth16").await {
                         Ok(res) => res,
                         Err(e) => {
@@ -360,16 +362,17 @@ async fn update_verified_payloads_handler(
 
 async fn run_prover(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
-    proof_type: &str,
+    _proof_type: &str,
 ) -> Result<(ProofFixture, String)> {
     setup_logger();
     let provider = get_provider().await.unwrap();
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY not set in .env");
-    let signer = NetworkSigner::local(&private_key).unwrap();
+    let _signer = NetworkSigner::local(&private_key).unwrap();
     if !check_gas_balance(&provider).await.unwrap() {
         println!("Insufficient gas balance to proceed with proving.");
         return Err(eyre::eyre!("Insufficient gas balance"));
     }
+    println!("=============setting up prover client===============");
     let prover_client = ProverClient::builder()
         .cpu()
         // .network_for(NetworkMode::Mainnet)
@@ -379,7 +382,8 @@ async fn run_prover(
 
     let pk = prover_client.setup(ENERGY_TRACKER_ELF).await.unwrap();
     let vk = pk.verifying_key();
-    let (payload, _) = match build_proving_payload(payload, vk).await {
+    println!("=============proceeding to build program inputs===============");
+    let (payload, _) = match build_proving_payload(&provider, payload, vk).await {
         Ok(res) => res,
         Err(e) => return Err(eyre::eyre!("Failed to build payload: {:?}", e)),
     };
@@ -431,13 +435,10 @@ async fn run_prover(
 }
 
 async fn build_proving_payload(
+    provider: &impl Provider,
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
     vk: &SP1VerifyingKey,
 ) -> Result<(Payload, B256)> {
-    let provider = match get_provider().await {
-        Ok(p) => p,
-        Err(e) => return Err(eyre::eyre!("Failed to get provider: {:?}", e)),
-    };
 
     if !check_program_vkey(&provider, vk.bytes32_raw())
         .await
