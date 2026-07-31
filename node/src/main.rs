@@ -409,14 +409,14 @@ async fn run_prover(
         "plonk" => {
             prover_client
                 .prove(&pk, stdin)
-                // .skip_simulation(true)
+                .skip_simulation(true)
                 .plonk()
                 .await
         }
         "groth16" => {
             prover_client
                 .prove(&pk, stdin)
-                // .skip_simulation(true)
+                .skip_simulation(true)
                 .groth16()
                 .await
         }
