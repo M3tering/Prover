@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, println, sync::Arc, unimplemented};
+use std::{collections::HashMap, env, format, println, sync::Arc};
 
 use alloy_primitives::{B256, Bytes, U256, hex};
 use axum::{
@@ -20,14 +20,17 @@ use energy_tracker_lib::{
     extract_nonce, to_b256,
 };
 use energy_tracker_verifier::{
-    Provider, check_gas_balance, check_program_vkey, commit_state, get_block_rpl_bytes, get_previous_values, get_provider, get_storage_proofs,
+    Provider, check_gas_balance, check_program_vkey, commit_state, get_block_rpl_bytes,
+    get_previous_values, get_provider, get_storage_proofs,
 };
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sp1_sdk::{
-    Elf, HashableKey, ProveRequest, Prover, ProverClient, ProvingKey, SP1ProofWithPublicValues, SP1Stdin, 
-    SP1VerifyingKey, include_elf, network::{NetworkMode, signer::NetworkSigner}, utils::setup_logger
+    Elf, HashableKey, ProveRequest, Prover, ProverClient, ProvingKey, SP1ProofWithPublicValues,
+    SP1Stdin, SP1VerifyingKey, include_elf,
+    network::{NetworkMode, signer::NetworkSigner},
+    utils::setup_logger,
 };
 use tokio::time::{self, Duration};
 
@@ -83,6 +86,26 @@ table! {
     }
 }
 
+fn get_query_string() -> String {
+    let query_string = "SELECT *
+            FROM m3ter_payloads
+            WHERE is_verified = FALSE
+            ORDER BY m3ter_id ASC, nonce ASC
+        ";
+    let limit = env::var("QUERY_LIMIT").unwrap_or_else(|_| "".to_string());
+    let limit = if !limit.is_empty() {
+        println!("limit value {}", limit);
+        match limit.parse::<u64>() {
+            Ok(l) => format!("{}\nLIMIT {}", query_string, l),
+            Err(_) => query_string.to_string(),
+        }
+    } else {
+        query_string.to_string()
+    };
+    println!("limit query {}", limit);
+    limit
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -103,16 +126,10 @@ async fn main() {
             interval.tick().await;
             match db_pool.get() {
                 Ok(mut conn) => {
-                    let proving_payload = sql_query(
-                        "SELECT *
-                            FROM m3ter_payloads
-                            WHERE is_verified = FALSE
-                            ORDER BY m3ter_id ASC, nonce ASC
-                            Limit 10000
-                        ",
-                    )
-                    .load::<M3terPayload>(&mut conn)
-                    .expect("Failed to load payloads");
+                    _ = update_payload(&mut conn).await;
+                    let proving_payload = sql_query(get_query_string())
+                        .load::<M3terPayload>(&mut conn)
+                        .expect("Failed to load payloads");
                     if proving_payload.is_empty() {
                         println!("No new payloads to process");
                         continue;
@@ -134,7 +151,7 @@ async fn main() {
                         println!("m3ter {}, with payload length {}", k, v.len());
                     }
                     println!("========start running prover=============");
-                    let (proof_fixture, hash) = match run_prover(grouped, "groth16").await {
+                    let (_, hash) = match run_prover(grouped, "groth16").await {
                         Ok(res) => res,
                         Err(e) => {
                             eprintln!("Prover error: {}", e);
@@ -142,7 +159,7 @@ async fn main() {
                         }
                     };
                     println!("Committed state with tx hash: {}", hash);
-                    let _ = update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
+                    let _ = update_payload(&mut conn).await;
                 }
                 Err(e) => {
                     eprintln!("Failed to get DB connection: {:?}", e);
@@ -197,7 +214,6 @@ async fn run_prover_handler(
     State(db_state): State<Arc<DbPool>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    
     let proof_type = params
         .get("proof_type")
         .map(|s| {
@@ -220,15 +236,9 @@ async fn run_prover_handler(
     };
 
     tokio::spawn(async move {
-        let proving_payload = match sql_query(
-            "SELECT *
-                FROM m3ter_payloads
-                WHERE is_verified = FALSE
-                ORDER BY m3ter_id ASC, nonce ASC
-            ",
-        )
-        .load::<M3terPayload>(&mut conn)
-        {
+        
+        let _ = update_payload(&mut conn).await;
+        let proving_payload = match sql_query(get_query_string()).load::<M3terPayload>(&mut conn) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("Failed to load payloads: {:?}", e);
@@ -254,7 +264,7 @@ async fn run_prover_handler(
                 ));
         }
 
-        let (proof_fixture, hash) = match run_prover(grouped, &proof_type).await {
+        let (_, hash) = match run_prover(grouped, &proof_type).await {
             Ok(res) => res,
             Err(e) => {
                 eprintln!("Prover error: {}", e);
@@ -262,7 +272,7 @@ async fn run_prover_handler(
             }
         };
         println!("Committed state with tx hash: {}", hash);
-        let _ = update_payload(&mut conn, proof_fixture.new_nonces.to_vec()).await;
+        let _ = update_payload(&mut conn).await;
         println!("Updated payloads as verified");
     });
 
@@ -347,9 +357,7 @@ async fn update_verified_payloads_handler(
     State(db_state): State<Arc<DbPool>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let mut connection = db_state.get().unwrap();
-    let provider = get_provider().await.expect("Failed to get provider");
-    let previous_nonces = get_previous_values(&provider, U256::from(1)).await.unwrap();
-    let _ = update_payload(&mut connection, previous_nonces.into()).await;
+    let _ = update_payload(&mut connection).await;
 
     (
         StatusCode::OK,
@@ -387,25 +395,28 @@ async fn run_prover(
         Ok(res) => res,
         Err(e) => return Err(eyre::eyre!("Failed to build payload: {:?}", e)),
     };
-    
+
     let mut stdin = SP1Stdin::new();
     stdin.write(&payload);
-    println!("====starting execution report======");
-    let (_, report) = prover_client.execute(ENERGY_TRACKER_ELF, stdin.clone()).await.unwrap();
-    println!("report {:?}", report);
+    // println!("====starting execution report======");
+    // let (_, report) = prover_client
+    //     .execute(ENERGY_TRACKER_ELF, stdin.clone())
+    //     .await
+    //     .unwrap();
+    // println!("report {:?}", report);
     println!("====starting proof generation======");
     let proof = match match proof_type {
         "plonk" => {
             prover_client
                 .prove(&pk, stdin)
-                .skip_simulation(true)
+                // .skip_simulation(true)
                 .plonk()
                 .await
         }
         "groth16" => {
             prover_client
                 .prove(&pk, stdin)
-                .skip_simulation(true)
+                // .skip_simulation(true)
                 .groth16()
                 .await
         }
@@ -439,7 +450,6 @@ async fn build_proving_payload(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
     vk: &SP1VerifyingKey,
 ) -> Result<(Payload, B256)> {
-
     if !check_program_vkey(&provider, vk.bytes32_raw())
         .await
         .unwrap()
@@ -486,7 +496,6 @@ async fn build_proving_payload(
 
 async fn update_payload(
     connection: &mut PooledConnection<ConnectionManager<PgConnection>>,
-    nonces: Vec<u8>,
 ) -> Result<()> {
     use self::m3ter_payloads::dsl::*;
     use diesel::prelude::*;
@@ -500,6 +509,8 @@ async fn update_payload(
         "delete" => DataStrategy::Delete,
         _ => DataStrategy::Persist,
     };
+    let provider = get_provider().await.expect("Failed to get provider");
+    let nonces = get_previous_values(&provider, U256::from(1)).await.unwrap();
     let nonces_in_db = m3ter_payloads
         .select(m3ter_id)
         .distinct()
@@ -521,7 +532,11 @@ async fn update_payload(
                 .execute(connection),
         };
 
-        println!("rows updated {} with strategy {:?}", rows.unwrap_or_default(), strategy);
+        println!(
+            "rows updated {} with strategy {:?}",
+            rows.unwrap_or_default(),
+            strategy
+        );
     });
     Ok(())
 }
