@@ -44,6 +44,7 @@ services:
       - BLOCK_INTERVAL=${BLOCK_INTERVAL}
       - DATA_STRATEGY=${DATA_STRATEGY:-delete}
       - PROVER_NODE_PORT=${PROVER_NODE_PORT:-8080}
+      - QUERY_LIMIT=${QUERY_LIMIT}
     depends_on:
       db:
         condition: service_healthy
