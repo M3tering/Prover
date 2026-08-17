@@ -90,13 +90,14 @@ fn get_query_string() -> String {
     let query_string = "SELECT *
             FROM m3ter_payloads
             WHERE is_verified = FALSE
+            AND m3ter_id <> 7
             ORDER BY m3ter_id ASC, nonce ASC
         ";
     let limit = env::var("QUERY_LIMIT").unwrap_or_else(|_| "".to_string());
     let limit = if !limit.is_empty() {
         println!("limit value {}", limit);
         match limit.parse::<u64>() {
-            Ok(l) => format!("{}\nLIMIT {}", query_string, l),
+            Ok(l) => format!("{} LIMIT {}", query_string, l),
             Err(_) => query_string.to_string(),
         }
     } else {
