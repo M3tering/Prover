@@ -37,7 +37,7 @@ use tokio::time::{self, Duration};
 /// The ELF (executable and linkable format) file for the Succinct RISC-V zkVM.
 pub const ENERGY_TRACKER_ELF: Elf = include_elf!("energy-tracker-program");
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProofFixture {
     previous_balances: B256,
@@ -427,7 +427,10 @@ async fn run_prover(
         Err(e) => return Err(eyre::eyre!("Prover error: {:?}", e)),
     };
 
-    let proof_fixture = create_proof_fixture(&proof, vk);
+    let (proof_fixture, err) = create_proof_fixture(&proof, vk);
+    if err.is_some() {
+        return Err(eyre::eyre!("Failed to create proof fixture: {:?}", err));
+    }
     println!("Proof generated successfully proof = {:?}", &proof_fixture);
 
     println!("Committing state ...");
@@ -451,17 +454,11 @@ async fn build_proving_payload(
     payload: HashMap<String, Vec<energy_tracker_lib::M3terPayload>>,
     vk: &SP1VerifyingKey,
 ) -> Result<(Payload, B256)> {
-    if !check_program_vkey(&provider, vk.bytes32_raw())
-        .await
-        .unwrap()
-    {
-        return Err(eyre::eyre!(
-            "Program Vkey does not match the on-chain value"
-        ));
-    }
-
     let previous_nonces = get_previous_values(&provider, U256::from(1)).await.unwrap();
     let previous_balances = get_previous_values(&provider, U256::from(0)).await.unwrap();
+    
+    let previous_nonces = if previous_nonces.len() > 2 { previous_nonces } else { Bytes::new() };
+    let previous_balances = if previous_balances.len() > 2 { previous_balances } else { Bytes::new() };
 
     let slot_keys = payload
         .keys()
@@ -475,7 +472,14 @@ async fn build_proving_payload(
     let (account_proof, encoded_account, storage_hash, proofs, anchor_block) =
         get_storage_proofs(&provider, slot_keys).await.unwrap();
     let block_bytes = get_block_rpl_bytes(&provider, anchor_block).await.unwrap();
-
+    if !check_program_vkey(&provider, vk.bytes32_raw())
+        .await
+        .unwrap()
+    {
+        return Err(eyre::eyre!(
+            "Program Vkey does not match the on-chain value"
+        ));
+    }
     println!("Loaded payloads: {:?}", payload);
     println!("Anchor Block: {:?}", anchor_block);
     Ok((
@@ -483,13 +487,13 @@ async fn build_proving_payload(
             mempool: payload,
             previous_nonces: previous_nonces.into(),
             previous_balances: previous_balances.into(),
-            proofs: Some(ProofStruct {
+            proofs: ProofStruct {
                 account_proof,
                 encoded_account,
                 storage_hash,
                 proofs,
-            }),
-            block_bytes: Some(block_bytes),
+            },
+            block_bytes,
         },
         anchor_block,
     ))
@@ -568,8 +572,13 @@ fn is_unique_nonce(
     }
 }
 
-fn create_proof_fixture(proof: &SP1ProofWithPublicValues, vk: &SP1VerifyingKey) -> ProofFixture {
+fn create_proof_fixture(proof: &SP1ProofWithPublicValues, vk: &SP1VerifyingKey) -> (ProofFixture, Option<String>) {
     let bytes = proof.public_values.as_slice();
+if bytes.len() < 96 {
+    let s = String::from_utf8_lossy(bytes);
+    println!("Public values too short ({} bytes): {}", bytes.len(), s);
+    return (ProofFixture::default(), Some(format!("Public values too short ({} bytes): {}", bytes.len(), s)));
+}
     let output = PublicValuesStruct::from_bytes(bytes);
     let PublicValuesStruct {
         previous_balances,
@@ -580,7 +589,7 @@ fn create_proof_fixture(proof: &SP1ProofWithPublicValues, vk: &SP1VerifyingKey) 
     } = output;
 
     // Create the testing fixture so we can test things end-to-end.
-    ProofFixture {
+    (ProofFixture {
         previous_balances,
         previous_nonces,
         new_balances,
@@ -589,5 +598,5 @@ fn create_proof_fixture(proof: &SP1ProofWithPublicValues, vk: &SP1VerifyingKey) 
         vkey: vk.bytes32().to_string(),
         public_values: format!("0x{}", hex::encode(bytes)),
         proof: proof.bytes().into(),
-    }
+    }, None)
 }

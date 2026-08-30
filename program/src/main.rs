@@ -1,7 +1,5 @@
 #![no_main]
 sp1_zkvm::entrypoint!(main);
-
-use core::panic;
 use std::println;
 
 use energy_tracker_lib::{
@@ -14,36 +12,18 @@ pub fn main() {
     let address = "9C547B649475f1bE81323AefdbcF209C17961D5E";
     println!("===== starting progam execution ================");
     let mempool = payload.mempool;
-    let mut initial_nonces = payload.previous_nonces;
-    let mut initial_balances = payload.previous_balances;
-
-    if initial_nonces.len() == 2 {
-        initial_nonces = vec![]
-    } else {
-        initial_nonces = initial_nonces[0..].to_vec()
-    };
-    if initial_balances.len() == 2 {
-        initial_balances = vec![]
-    } else {
-        initial_balances = initial_balances[0..].to_vec()
-    };
-    let previous_nonces = initial_nonces.to_owned();
-    let previous_balances = initial_balances.to_owned();
+    let initial_nonces = payload.previous_nonces;
+    let initial_balances = payload.previous_balances;
     println!("======= destructuring values ===============");
-    let (account_proof, encoded_account, storage_hash, proofs) = match payload.proofs {
-        Some(value) => (
-            value.account_proof,
-            value.encoded_account,
-            value.storage_hash,
-            value.proofs,
-        ),
-        None => panic!("storage proofs missing"),
-    };
+    let proof_struct = payload.proofs;
+    let (account_proof, encoded_account, storage_hash, proofs) = (
+        proof_struct.account_proof,
+        proof_struct.encoded_account,
+        proof_struct.storage_hash,
+        proof_struct.proofs,
+    );
 
-    let (state_root, block_bytes) = match payload.block_bytes {
-        Some(value) => (get_state_root(&value), value),
-        None => panic!("block bytes missing"),
-    };
+    let (state_root, block_bytes) = (get_state_root(&payload.block_bytes), payload.block_bytes);
 
     println!("======= verify account ===============");
     if !verify_account_proof(
@@ -52,7 +32,8 @@ pub fn main() {
         encoded_account,
         account_proof,
     ) {
-        panic!("Account proof verification failed");
+        sp1_zkvm::io::commit_slice("Account proof verification failed".as_bytes());
+        return;
     };
 
     let m3ter_position = |m3ter_id: usize| (m3ter_id * 6, m3ter_id * 6 + 6);
@@ -73,15 +54,17 @@ pub fn main() {
         (six_bytes.try_into().unwrap(), true)
     };
 
-    if previous_nonces.len() != previous_balances.len() {
-        panic!(
-            "total nonces {} does not equal total balances {}",
-            previous_nonces.len(),
-            previous_balances.len()
-        )
+    if initial_nonces.len() != initial_balances.len() {
+        let error_message = format!(
+            "Initial nonces and balances length mismatch: {} vs {}",
+            initial_nonces.len(),
+            initial_balances.len()
+        );
+        sp1_zkvm::io::commit_slice(error_message.as_bytes());
+        return;
     }
-    let mut new_nonces = previous_nonces.clone();
-    let mut new_balances = previous_balances.clone();
+    let mut new_nonces = initial_nonces.clone();
+    let mut new_balances = initial_balances.clone();
 
     println!("======= process values ===============");
     for (m3ter_key, m3ter_payloads) in mempool {
@@ -90,14 +73,14 @@ pub fn main() {
             calc_slot_key(to_u256(m3ter_id as u64)).unwrap()
         ))) {
             Some(value) => value,
-            None => panic!("failed to get proof for m3ter {}", m3ter_id),
+            None => continue,
         };
         let public_key = to_b256(*public_key).to_string();
         let m3ter = M3ter::new(&m3ter_key, &public_key);
 
         let (start, end) = m3ter_position(m3ter_id);
-        if start >= previous_nonces.len() || previous_nonces.len() < 6 {
-            let padding_len = end - previous_nonces.len();
+        if start >= initial_nonces.len() || initial_nonces.len() < 6 {
+            let padding_len = end - initial_nonces.len();
             new_nonces.extend(vec![0u8; padding_len]);
             new_balances.extend(vec![0u8; padding_len]);
         }
@@ -154,7 +137,8 @@ pub fn main() {
     let new_balances = trim_zeros(new_balances);
 
     if new_balances == initial_balances {
-        panic!("New balances matches previous balances");
+        sp1_zkvm::io::commit_slice("New balances matches previous balances".as_bytes());
+        return;
     }
 
     let new_nonces = trim_zeros(new_nonces).into();

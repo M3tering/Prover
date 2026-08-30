@@ -92,8 +92,8 @@ pub struct Payload {
     pub previous_nonces: Vec<u8>,
     #[serde(deserialize_with = "deserialize_hex", serialize_with = "serialize_hex")]
     pub previous_balances: Vec<u8>,
-    pub proofs: Option<ProofStruct>,
-    pub block_bytes: Option<Vec<u8>>,
+    pub proofs: ProofStruct,
+    pub block_bytes: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
