@@ -410,6 +410,7 @@ async fn run_prover(
         "plonk" => {
             prover_client
                 .prove(&pk, stdin)
+                .gas_limit(1_000_000_000_000)
                 .skip_simulation(true)
                 .plonk()
                 .await
@@ -417,6 +418,7 @@ async fn run_prover(
         "groth16" => {
             prover_client
                 .prove(&pk, stdin)
+                .gas_limit(1_000_000_000_000)
                 .skip_simulation(true)
                 .groth16()
                 .await
