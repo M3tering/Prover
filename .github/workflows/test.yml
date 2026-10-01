@@ -1,0 +1,28 @@
+name: Protocol
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler pkg-config libssl-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked -p m3tering-protocol -p m3tering-prover
+      - run: cargo build --locked -p m3tering-prover --features proving
+      - name: Install pinned SP1
+        run: |
+          curl -L https://sp1up.succinct.xyz | bash
+          "$HOME/.sp1/bin/sp1up" --version v6.3.1
+          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
+      - name: Build guest
+        run: cargo prove build --locked -p m3tering-program --output-directory elf
+      - name: Execute authenticated fixture without buying a proof
+        env:
+          SP1_ELF: elf/m3tering-program
+          WITNESS_FILE: fixtures/input.json
+        run: cargo run --locked -p m3tering-prover --features proving -- execute-fixture

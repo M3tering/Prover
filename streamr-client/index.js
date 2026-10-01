@@ -32,7 +32,7 @@ initializeDatabase().then(async db => {
     const app = express()
     const port = process.env.STREAMR_CLIENT_PORT || 3000
 
-    app.get('/health', res => {
+    app.get('/health', (_req, res) => {
         res.status(200).json({ status: 'ok' })
     })
 

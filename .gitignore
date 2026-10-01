@@ -1,33 +1,7 @@
-# Cargo build
-**/target
-
-# Cargo config
-.cargo
-
-# Profile-guided optimization
-/tmp
-pgo-data.profdata
-
-# MacOS nuisances
-.DS_Store
-
-# Proofs
-**/proof-with-pis.json
-**/proof-with-io.json
-
-# Env
+/target/
+/elf/
+/prover-output*/
+.env
+**/node_modules/
 **/.env
-.env.prebuilt
-
-# DIESEL files
-schema.rs
-
-db/password.txt
-
-# DAppNodeSDK release directories
-  build_*
-  releases.json
-  docker-compose-tmp.yml
-
-  **/node_modules
-  
+*.log

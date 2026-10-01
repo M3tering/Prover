@@ -1,17 +1,7 @@
 [package]
+name = "m3tering-program"
 version = "0.1.0"
-name = "energy-tracker-program"
 edition = "2021"
-
-[profile.release]
-overflow-checks = true
-
 [dependencies]
-alloy-sol-types = { workspace = true }
-serde = { workspace = true }
-hex = { workspace = true }
-sp1-zkvm = { version = "6.3.1" }
-energy-tracker-lib = { path = "../lib" }
-rayon = "1.11.0"
-
-
+sp1-zkvm = "=6.3.1"
+m3tering-protocol = { path = "../lib" }
