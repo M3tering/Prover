@@ -582,14 +582,15 @@ async fn prove_and_send(
     )?
     .try_into()?;
     let wallet = EthereumWallet::from(signer);
-    let tx = TransactionRequest::default()
-        .to(input.rollup)
-        .input(Bytes::from(data).into())
-        .nonce(nonce)
-        .chain_id(input.chain_id.try_into()?)
-        .gas_limit(gas)
-        .max_fee_per_gas(max_fee)
-        .max_priority_fee_per_gas(priority);
+    let tx = commit_transaction(
+        input.rollup,
+        data,
+        input.chain_id.try_into()?,
+        nonce,
+        gas,
+        max_fee,
+        priority,
+    );
     let signed = tx.build(&wallet).await?;
     let raw = signed.encoded_2718();
     // Save signed bytes BEFORE broadcasting. Recovery rebroadcasts the identical
@@ -637,6 +638,24 @@ async fn prove_and_send(
     )?;
     Ok(())
 }
+fn commit_transaction(
+    rollup: Address,
+    data: Vec<u8>,
+    chain_id: u64,
+    nonce: u64,
+    gas: u64,
+    max_fee: u128,
+    priority: u128,
+) -> TransactionRequest {
+    TransactionRequest::default()
+        .to(rollup)
+        .input(Bytes::from(data).into())
+        .nonce(nonce)
+        .with_chain_id(chain_id)
+        .gas_limit(gas)
+        .max_fee_per_gas(max_fee)
+        .max_priority_fee_per_gas(priority)
+}
 fn has_paid_artifacts(out: &Path) -> bool {
     [
         "paid-attempt.json",
@@ -649,6 +668,29 @@ fn has_paid_artifacts(out: &Path) -> bool {
 }
 #[cfg(test)]
 mod recovery_tests {
+    #[tokio::test]
+    async fn signed_transaction_roundtrip_preserves_chain_nonce_destination_and_input() {
+        use super::*;
+        use alloy::{
+            consensus::{Transaction, TxEnvelope},
+            eips::Decodable2718,
+        };
+        let signer = PrivateKeySigner::from_str(&"01".repeat(32)).unwrap();
+        let wallet = EthereumWallet::from(signer);
+        let destination = Address::from([7u8; 20]);
+        let request =
+            commit_transaction(destination, vec![1, 2, 3, 4], 11155111, 42, 200000, 100, 2);
+        let signed = request.build(&wallet).await.unwrap();
+        let raw = signed.encoded_2718();
+        let decoded = TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();
+        assert_eq!(decoded.chain_id(), Some(11155111));
+        assert_eq!(decoded.nonce(), 42);
+        assert_eq!(decoded.to(), Some(destination));
+        assert_eq!(decoded.input().as_ref(), &[1, 2, 3, 4]);
+        assert_eq!(*decoded.tx_hash(), keccak256(&raw));
+        assert_eq!(decoded.tx_hash(), signed.tx_hash());
+    }
+
     #[test]
     fn paid_request_blocks_witness_overwrite_before_proof_arrives() {
         let dir = std::env::temp_dir().join(format!(
