@@ -100,7 +100,7 @@ The contract writes in one loop before a static verifier call. Verification fail
 
 ## Build and test
 
-Use Rust **1.99.1** and SP1 **6.3.1**. The proving-enabled host needs protobuf/protoc, pkg-config and OpenSSL development headers. Install SP1 from the official Succinct distribution, pinning `sp1up --version v6.3.1`.
+Use Rust **1.99.1** and SP1 **6.3.1**. The proving-enabled host needs protobuf/protoc including its well-known `.proto` files (`protobuf-compiler` and `libprotobuf-dev` on Debian), pkg-config and OpenSSL development headers. Install SP1 from the official Succinct distribution, pinning `sp1up --version v6.3.1`.
 
 ```sh
 cargo fmt --all -- --check
