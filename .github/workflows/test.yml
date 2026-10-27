@@ -8,7 +8,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler pkg-config libssl-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
@@ -25,7 +25,10 @@ jobs:
         env:
           SP1_ELF: elf/m3tering-program
           WITNESS_FILE: fixtures/input.json
-        run: cargo run --locked -p m3tering-prover --features proving -- execute-fixture
+        run: |
+          cargo run --locked -p m3tering-prover --features proving -- execute-fixture | tee execution.log
+          key=$(jq -r .program_key release/program-build.json)
+          grep -F "Program verification key: $key" execution.log
 
   ingestion:
     runs-on: ubuntu-latest
