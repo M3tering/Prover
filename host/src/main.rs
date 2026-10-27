@@ -546,7 +546,13 @@ async fn prove_and_send(
         proof.public_values.as_slice() == t.public_values.as_slice(),
         "proof statement mismatch"
     );
-    proof.save(out.join("proof.bin"))?;
+    if !out.join("proof.bin").exists() {
+        let temporary = out.join("proof.bin.tmp");
+        proof.save(&temporary)?;
+        std::fs::File::open(&temporary)?.sync_all()?;
+        std::fs::rename(&temporary, out.join("proof.bin"))?;
+        std::fs::File::open(out)?.sync_all()?;
+    }
     preflight(rpc, input, t).await?;
     let data = commitStateCall {
         updates: t.payload.clone().into(),
@@ -630,6 +636,43 @@ async fn prove_and_send(
         serde_json::to_vec(&json!({"transaction":receipt.transaction_hash}))?,
     )?;
     Ok(())
+}
+fn has_paid_artifacts(out: &Path) -> bool {
+    [
+        "paid-attempt.json",
+        "request.json",
+        "proof.bin",
+        "transaction.json",
+    ]
+    .iter()
+    .any(|name| out.join(name).exists())
+}
+#[cfg(test)]
+mod recovery_tests {
+    #[test]
+    fn paid_request_blocks_witness_overwrite_before_proof_arrives() {
+        let dir = std::env::temp_dir().join(format!(
+            "m3ter-recovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        assert!(!super::has_paid_artifacts(&dir));
+        for name in [
+            "paid-attempt.json",
+            "request.json",
+            "proof.bin",
+            "transaction.json",
+        ] {
+            std::fs::write(dir.join(name), b"{}").unwrap();
+            assert!(super::has_paid_artifacts(&dir));
+            std::fs::remove_file(dir.join(name)).unwrap();
+        }
+        std::fs::remove_dir(dir).unwrap();
+    }
 }
 fn durable_json(path: &Path, value: &Value) -> Result<()> {
     let file = std::fs::OpenOptions::new()
@@ -798,6 +841,16 @@ async fn main() -> Result<()> {
         std::env::var("OUTPUT_DIR").unwrap_or_else(|_| "prover-output".into()),
     );
     std::fs::create_dir_all(&out)?;
+    let output_lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(out.join(".lock"))?;
+    output_lock
+        .try_lock_exclusive()
+        .context("another process is using OUTPUT_DIR")?;
+
     if mode == "recover" {
         #[cfg(feature = "proving")]
         {
@@ -824,10 +877,14 @@ async fn main() -> Result<()> {
         bail!("recovery requires --features proving");
     }
 
-    ensure!(!out.join("proof.bin").exists() && !out.join("transaction.json").exists(),"OUTPUT_DIR contains a paid proof or transaction: choose a new directory; do not overwrite it");
+    ensure!(!has_paid_artifacts(&out), "OUTPUT_DIR contains a paid attempt: use recover or a new directory; do not overwrite its witness");
     let (input, t, b) = plan(&rpc, rollup).await?;
     std::fs::write(out.join("input.json"), serde_json::to_vec_pretty(&input)?)?;
     std::fs::write(out.join("transition.json"), serde_json::to_vec_pretty(&t)?)?;
+    std::fs::File::open(out.join("input.json"))?.sync_all()?;
+    std::fs::File::open(out.join("transition.json"))?.sync_all()?;
+    std::fs::File::open(&out)?.sync_all()?;
+
     if mode == "run" {
         #[cfg(feature = "proving")]
         prove_and_send(&rpc, &input, &t, b, &out).await?;
