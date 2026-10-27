@@ -2,6 +2,62 @@
 
 The prover validates signed meter actions, aggregates energy and produces SP1 proofs for sparse [Rollup](https://github.com/M3tering/Rollup) state updates. The host reads only selected storage words and signing keys, plans a batch that fits its gas budget, proves the transition, and submits the resulting absolute replacements.
 
+## Run a node
+
+Install Docker Engine / Docker Desktop with Compose. From this repository:
+
+```sh
+./node setup
+./node start
+./node status
+```
+
+Setup asks for the RPC URL, deployed Rollup address, Ethereum/SP1 credentials, optional Streamr stream, and proof interval. Secrets are saved in a private, git-ignored `.env`; do not share that file. The normal installation pulls images built by GitHub Actions; it does not compile Rust or SP1 locally. `./node update` pulls the newest published branch images. Pin `PROVER_IMAGE` and `API_IMAGE` to the release's `@sha256:...` digests for an exact deployment, rather than following a moving branch tag.
+
+The publishing workflow `.github/workflows/images.yml` runs protocol/ingestion tests, builds both Docker targets on GitHub-hosted runners, executes the real SP1 guest in the worker image, and publishes only after its checks pass. Images are `ghcr.io/m3tering/prover:propter-polar-bear` (worker) and `ghcr.io/m3tering/prover:propter-polar-bear-api` (API), with immutable commit-specific `sha-COMMIT` tags as well. Publishing uses GitHub's built-in token; it needs no Ethereum key or proving credits. It never buys a proof. Existing production `main` image tags are not overwritten by this workflow.
+
+To build from source instead, run `./node build`, then `./node start`. Source builds are large: prefer at least 8 GB RAM and 15 GB free disk space. The checked-in Dockerfile pins base-image digests; Rust 1.99.1, Cargo.lock, package-lock.json and SP1 6.3.1 pin application inputs. The guest ELF is checked in with its SHA-256 and program vkey manifest and verified during the image build. OS security packages are resolved at image build time; published image digests identify the exact runtime. Images target Linux amd64; Docker can emulate this on ARM machines, with a performance penalty. `WORKER_MEMORY` sets the worker memory limit (default 4 GB).
+
+Compose runs three persistent services: PostgreSQL, an HTTP/Streamr ingestion API, and the scheduled proving worker. The API does **not** receive the Ethereum/SP1 spending keys. PostgreSQL is internal; HTTP binds only to `127.0.0.1:19000`. Database and proof artifacts survive restarts and `docker compose down`; **do not use `down -v`** unless intentionally deleting all state. Each database is bound to one chain and Rollup address.
+
+For public HTTPS, point a hostname at your server and place nginx or another TLS proxy in front of port 19000. `ops/test-prover.nginx.conf` is the configuration for `test-prover.m3ter.ing`. Obtain a trusted certificate with Certbot. Do not expose a plaintext public port as a substitute for HTTPS.
+
+```sh
+./node logs api       # ingestion / Streamr status
+./node logs worker    # schedule and batch status
+./node network        # read SP1 credit balance and quoted price
+./node backup         # PostgreSQL backup under backups/
+./node stop           # retains all data
+```
+
+Also back up the `proofs` Docker volume, which contains paid requests, proofs, signed transactions and receipts. Restore the database and proof files together. Inspect batch `host.log` files in that volume for detailed preflight failures. No public endpoint can trigger spending; the worker is controlled by private configuration.
+
+### Receiving actions
+
+Both transports accept the same JSON array used by the previous deployment:
+
+```json
+[{"m3ter_id": 7, "message": "<144 hex characters: 8 signed bytes followed by 64 signature bytes>"}]
+```
+
+POST it to `https://YOUR_HOST/batch-payloads` with `Content-Type: application/json`, or publish it to `STREAM_ID`. The two signed uint32 fields are big-endian nonce and energy in mWh. The API checks exact byte lengths, meter/nonce capacity, Ed25519 signatures against the **current Rollup key**, and already-consumed nonces before storing anything. It derives all accounting fields from the signed bytes. The whole batch is atomic; an invalid action rejects it. Identical retries deduplicate, conflicting actions at the same meter nonce reject, and the database unique constraint also handles concurrent arrivals. HTTP returns 202 with accepted/duplicate counts, 400 for invalid data, 413 for oversized bodies, and 429/503 for retryable congestion or RPC failures. Default limits are 1,000 actions and 256 KiB per HTTP batch. Streamr failures are logged; publishers should retain/retry data or use HTTPS acknowledgements when delivery confirmation is needed.
+
+`GET /health` checks the API/database and reports chain, Rollup and Streamr status; it does not claim that a paid proof has succeeded. A fresh Rollup starts every account and nonce at zero. Meter owners must call `setPublicKey(id,key)`, then meters must start with nonce **1**. Old high-nonce traffic is not a substitute for a genesis checkpoint. The new node uses an independent database.
+
+### Scheduling, budgets and recovery
+
+Set `PROVING_ENABLED=true` to permit paid work. `PROVE_INTERVAL_SECONDS` controls the delay between runs (default 3,600 seconds). The worker checks the queue on startup, serializes its batches, automatically halves the action cap after a local cycle/PGU admission failure (before any purchase), and checks signatures/nonces again before selecting eligible actions. Nonce gaps wait without blocking unrelated meters. Consumed queue entries are retained for audit. A confirmed/finalized chain read is used for queue cleanup; the proof host performs its own current-state checks.
+
+The host chooses a batch within its mixed fresh/reused slot gas budget, then measures storage-writing gas on the live chain using `eth_estimateGas` with a simulation-only verifier override, shrinks the batch if necessary, reserves verifier overhead and 20% headroom, checks wallet funding and guest identity, and executes locally before purchasing a proof. `MAX_PRICE_PER_PGU=auto` uses the SP1 network's quoted maximum price per PGU, with no added percentage buffer. Set a numeric value for a fixed cap, and optionally `MAX_PROOF_COST_WEI` for an absolute per-proof PROVE limit. Ethereum gas limits do not bound the price of PROVE. Network credit and Ethereum balance checks fail before purchase when insufficient.
+
+A durable marker is written **before** requesting a paid proof. The returned request ID is saved immediately; the worker automatically recovers that same request after a timeout or restart. Saved proofs are reverified and reused while their old state/keys remain current. Ethereum transactions are signed and saved before broadcasting, so recovery rebroadcasts identical bytes/hash. Only a successful, confirmed, canonical receipt marks selected messages consumed. An ambiguous paid request without a saved request ID pauses further buying; inspect the SP1 request history and recover its ID before proceeding. Stale proofs or reverted transactions also require operator review instead of automatic repurchase.
+
+```sh
+./node recover /data/batches/BATCH_DIRECTORY
+```
+
+Gas, cycle/PGU, fee and credit limits remain configurable in `.env`/Compose. A valid proof cannot guarantee inclusion if another writer changes state or fees change. Use one worker and one submission wallet for this deployment; unrelated wallet activity is not coordinated.
+
 ## Repository layout
 
 - `lib`: signed-action accounting, packed state and the shared statement/wire codec.
@@ -36,13 +92,15 @@ The guest's public output is `keccak256(transcript)` (32 bytes). The transcript 
 
 The used-key hash covers four 32-byte entries: the full key for a changed lane and zero for an unchanged lane. The contract reconstructs this transcript from its live old words/keys and the proposed replacements. Old words and keys do not appear in commit calldata. Destination fields prevent proof reuse on another chain/deployment; old words reject stale updates; indices, new words and keys authenticate the exact transition. Count is implicit and the configured SP1 key identifies the program.
 
+The RPC must support EIP-1898 hash-pinned calls and `eth_estimateGas` state overrides. The latter changes only a simulation; real commits always use the actual verifier.
+
 The host pins its RPC reads to one canonical block hash for consistency, but that block is not committed and imposes no expiry. Proofs for disjoint words can coexist. Proofs sharing a word conflict, even when they change different meters in that word. A proof cannot replay after its own successful transition because old words and nonces have changed.
 
 The contract writes in one loop before a static verifier call. Verification failure rolls back all writes and length changes. After success, `StateCommitted(bytes updates)` emits the exact payload for indexers.
 
 ## Build and test
 
-Use Rust stable and SP1 **6.3.1**. The proving-enabled host needs protobuf/protoc, pkg-config and OpenSSL development headers. Install SP1 from the official Succinct distribution, pinning `sp1up --version v6.3.1`.
+Use Rust **1.99.1** and SP1 **6.3.1**. The proving-enabled host needs protobuf/protoc, pkg-config and OpenSSL development headers. Install SP1 from the official Succinct distribution, pinning `sp1up --version v6.3.1`.
 
 ```sh
 cargo fmt --all -- --check
@@ -53,7 +111,7 @@ SP1_ELF=elf/m3tering-program WITNESS_FILE=fixtures/input.json \
   cargo run --locked -p m3tering-prover --features proving -- execute-fixture
 ```
 
-`execute-fixture` executes the actual guest locally, verifies that its public output matches the shared transition code and prints the program verification key. It neither buys a proof nor submits an Ethereum transaction. Re-derive the key after changing the guest, dependencies or toolchain. Set that key and the target-chain verifier/M3ter addresses in the Rollup constants before deployment.
+`execute-fixture` executes the actual guest locally, verifies that its public output matches the shared transition code and prints the program verification key. It neither buys a proof nor submits an Ethereum transaction. Re-derive the key after changing the guest, dependencies or toolchain. Set that key and the target-chain verifier/M3ter addresses before deployment. The Sepolia Rollup permits only its deploying wallet to change the vkey and disables that setter on other chains.
 
 To regenerate the cross-language fixtures:
 
@@ -80,27 +138,13 @@ cargo run --locked -p m3tering-prover -- plan
 cargo run --locked -p m3tering-prover --features proving -- run
 ```
 
-Each invocation handles one batch. Schedule subsequent invocations with unique output directories. Keep one submitter per wallet/deployment unless you provide distributed coordination. A local file lock coordinates this host on one machine only.
+Each CLI invocation handles one batch. The packaged worker schedules invocations with unique output directories. Keep one submitter per wallet/deployment unless you provide distributed coordination. A local file lock coordinates this host on one machine only.
 
 `run` checks the deployed program key against the local ELF before buying a proof. It locally executes the guest, validates the expected public output, bounds cycles/PGU, checks SP1 credits, and applies an explicit network price cap and timeout. Ethereum `PRIVATE_KEY` and `SP1_PRIVATE_KEY` are separate credentials. Never commit real credentials.
 
 Before submitting, the host verifies the returned proof, checks current words/used keys again, simulates the call, estimates gas, adds 20% headroom and checks the signer's pending ETH balance using maximum fees. Only a successful, sufficiently confirmed, still-canonical receipt allows selected consumed database messages to be marked verified.
 
-Proofs and transaction receipts are saved. Output directories containing `proof.bin` or `transaction.json` cannot be overwritten. Preserve a paid proof after a send failure; it can be reused only while its old words and used keys remain current. There is no automatic paid retry, queue quarantine, distributed reservation service or submit-only recovery daemon. Malformed entries, nonce gaps and overflow can require operator attention.
-
-### Streamr ingestion
-
-The ingestion client subscribes to `STREAM_ID` and saves action bytes/signatures in PostgreSQL. It can run independently of proving:
-
-```sh
-cd streamr-client
-npm ci
-# Set DATABASE_URL and STREAM_ID in the environment or .env.
-# STREAMR_CLIENT_PORT defaults to 3000.
-npm start
-```
-
-Startup applies the checked-in database migration. `/health` serves the process health endpoint. Queue ingestion does not authenticate an energy transition; proof generation and on-chain verification do that.
+Proofs, request IDs, signed transactions and receipts are saved. Use the packaged worker or `recover` to resume a paid attempt. Never delete an unfinished attempt to bypass its safety checks. Standalone host database input requires the current ingestion migrations and `queue_status=ready` preparation by the worker.
 
 ## Gas admission and capacity
 

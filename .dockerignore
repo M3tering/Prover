@@ -1,6 +1,10 @@
 .git
-target
-elf
-**/node_modules
 **/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/target
+elf
 prover-output*
+*.log
+release/m3tering-prover

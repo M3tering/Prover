@@ -5,3 +5,6 @@
 **/node_modules/
 **/.env
 *.log
+
+backups/
+release/m3tering-prover

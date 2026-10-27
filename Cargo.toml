@@ -27,3 +27,13 @@ curve25519-dalek = { git = "https://github.com/sp1-patches/curve25519-dalek", ta
 k256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-5.0.0" }
 p256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-p256-13.2-sp1-5.0.0" }
 ecdsa = { git = "https://github.com/sp1-patches/signatures", tag = "patch-16.9-sp1-4.1.0" }
+
+# Keep compilation feasible on small nodes. Execution/cryptography dependencies
+# retain release optimization; the SDK is primarily network orchestration.
+[profile.release.package.sp1-sdk]
+opt-level = 0
+codegen-units = 256
+
+[profile.release.package.m3tering-prover]
+opt-level = 1
+codegen-units = 64

@@ -1,0 +1,95 @@
+name: m3tering
+x-node: &node
+  platform: linux/amd64
+  image: ${PROVER_IMAGE:-ghcr.io/m3tering/prover:propter-polar-bear}
+  build: {context: ., target: worker}
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 60s
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+x-environment: &environment
+  DATABASE_URL: postgres://m3tering:${POSTGRES_PASSWORD:?Run ./node setup}@db/m3tering
+  RPC_URL: ${RPC_URL:?Set RPC_URL}
+  CHAIN_ID: ${CHAIN_ID:-11155111}
+  ROLLUP_ADDRESS: ${ROLLUP_ADDRESS:?Set ROLLUP_ADDRESS}
+services:
+  db:
+    image: postgres:16-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: m3tering
+      POSTGRES_USER: m3tering
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run ./node setup}
+    volumes: [database:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U m3tering -d m3tering']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  init-data:
+    <<: *node
+    restart: 'no'
+    image: ${API_IMAGE:-ghcr.io/m3tering/prover:propter-polar-bear-api}
+    build: {context: ., target: api}
+    user: root
+    cap_drop: []
+    command: [sh, -c, 'mkdir -p /data/batches /data/cache && chown -R 1000:1000 /data']
+    volumes: [proofs:/data]
+  api:
+    <<: *node
+    mem_limit: ${API_MEMORY:-512m}
+    image: ${API_IMAGE:-ghcr.io/m3tering/prover:propter-polar-bear-api}
+    build: {context: ., target: api}
+    ports: ['127.0.0.1:${HTTP_PORT:-19000}:3000']
+    environment:
+      <<: *environment
+      STREAM_ID: ${STREAM_ID:-}
+      STREAMR_PRIVATE_KEY: ${STREAMR_PRIVATE_KEY:-}
+      MAX_BATCH_ACTIONS: ${MAX_BATCH_ACTIONS:-1000}
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, 'fetch("http://127.0.0.1:3000/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
+      interval: 15s
+      timeout: 5s
+      retries: 20
+  worker:
+    <<: *node
+    mem_limit: ${WORKER_MEMORY:-4g}
+    command: [node, worker-main.js]
+    environment:
+      <<: *environment
+      PRIVATE_KEY: ${PRIVATE_KEY:?Set PRIVATE_KEY}
+      SP1_PRIVATE_KEY: ${SP1_PRIVATE_KEY:?Set SP1_PRIVATE_KEY}
+      SP1_ELF: /opt/m3tering/release/program.elf
+      SP1_CACHE_DIR: /data/cache
+      PROVING_ENABLED: ${PROVING_ENABLED:-false}
+      PROVE_INTERVAL_SECONDS: ${PROVE_INTERVAL_SECONDS:-3600}
+      MAX_ACTIONS: ${MAX_ACTIONS:-10000}
+      MAX_SLOTS: ${MAX_SLOTS:-4096}
+      GAS_SCHEDULE: ${GAS_SCHEDULE:-current}
+      EXECUTION_GAS_BUDGET: ${EXECUTION_GAS_BUDGET:-15000000}
+      TOTAL_GAS_BUDGET: ${TOTAL_GAS_BUDGET:-15000000}
+      FIXED_EXECUTION_ALLOWANCE: ${FIXED_EXECUTION_ALLOWANCE:-1500000}
+      PER_WORD_OVERHEAD_ALLOWANCE: ${PER_WORD_OVERHEAD_ALLOWANCE:-12000}
+      MAX_FEE_PER_GAS_WEI: ${MAX_FEE_PER_GAS_WEI:-30000000000}
+      MAX_PRIORITY_FEE_PER_GAS_WEI: ${MAX_PRIORITY_FEE_PER_GAS_WEI:-1000000000}
+      ETH_RESERVE_WEI: ${ETH_RESERVE_WEI:-1000000000000000}
+      MAX_PROVER_CYCLES: ${MAX_PROVER_CYCLES:-100000000}
+      MAX_PROVER_PGU: ${MAX_PROVER_PGU:-100000000}
+      MAX_PRICE_PER_PGU: ${MAX_PRICE_PER_PGU:-auto}
+      MAX_PROOF_COST_WEI: ${MAX_PROOF_COST_WEI:-}
+      SP1_CREDIT_RESERVE_WEI: ${SP1_CREDIT_RESERVE_WEI:-0}
+      PROOF_TIMEOUT_SECONDS: ${PROOF_TIMEOUT_SECONDS:-3600}
+      CONFIRMATIONS: ${CONFIRMATIONS:-2}
+    volumes: [proofs:/data]
+    depends_on:
+      api: {condition: service_healthy}
+      init-data: {condition: service_completed_successfully}
+volumes:
+  database:
+  proofs:

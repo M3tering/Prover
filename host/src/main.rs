@@ -1,5 +1,7 @@
 mod budget;
 use alloy::{
+    eips::Encodable2718,
+    network::{EthereumWallet, TransactionBuilder},
     providers::{Provider, ProviderBuilder},
     rpc::types::TransactionRequest,
     signers::local::PrivateKeySigner,
@@ -129,7 +131,7 @@ async fn actions() -> Result<BTreeMap<u64, Vec<SignedAction>>> {
         }
     });
     let limit = i64::try_from(env_u64("MAX_ACTIONS", 10_000)?)?;
-    let rows=client.query("SELECT m3ter_id,message,signature FROM m3ter_payloads WHERE is_verified = false ORDER BY m3ter_id,nonce,id LIMIT $1",&[&limit]).await?;
+    let rows=client.query("SELECT m3ter_id,message,signature FROM m3ter_payloads WHERE is_verified = false AND queue_status = 'ready' ORDER BY m3ter_id,nonce,id LIMIT $1",&[&limit]).await?;
     let mut result = BTreeMap::<u64, Vec<SignedAction>>::new();
     for row in rows {
         let id: i64 = row.get(0);
@@ -203,20 +205,74 @@ async fn plan(rpc: &Rpc, rollup: Address) -> Result<(Input, Transition, budget::
     }
     pending.retain(|m, _| words.contains_key(&(m / 4)));
     ensure!(!pending.is_empty(), "no actions fit gas budgets");
-    let input = Input {
+    let mut input = Input {
         chain_id,
         rollup,
         words,
         keys,
         actions: pending,
     };
-    let t = transition::execute(&input).map_err(|e| anyhow!(e))?;
+    let mut t = transition::execute(&input).map_err(|e| anyhow!(e))?;
+    ensure!(!t.updates.is_empty(), "no eligible state transitions");
+    // Measure slot-writing cost on the actual target fork before buying a proof.
+    // Only the simulation's verifier code is replaced with STOP. The real
+    // transaction always uses the deployed verifier and its genuine proof.
+    let mut low = 0usize;
+    let mut high = t.updates.len();
+    while low < high {
+        let count = (low + high + 1) / 2;
+        let payload = &t.payload[..count * 36];
+        let fits = estimate_update_gas(rpc, rollup, payload, b)
+            .await
+            .is_ok_and(|gas| gas <= b.total_limit.min(b.execution_limit));
+        if fits {
+            low = count;
+        } else {
+            high = count - 1;
+        }
+    }
+    ensure!(low > 0, "live gas admission failed: RPC must support eth_estimateGas state overrides and at least one slot must fit");
+    if low < t.updates.len() {
+        let last = t.updates[low - 1].slot;
+        input.actions.retain(|id, _| id / 4 <= last);
+        input.words.retain(|slot, _| *slot <= last);
+        input.keys.retain(|slot, _| *slot <= last);
+        t = transition::execute(&input).map_err(|e| anyhow!(e))?;
+    }
     println!(
         "Planned {} words, {} packed payload bytes, 32 public-value bytes",
         t.updates.len(),
         t.payload.len()
     );
     Ok((input, t, b))
+}
+async fn estimate_update_gas(
+    rpc: &Rpc,
+    rollup: Address,
+    payload: &[u8],
+    b: budget::Budget,
+) -> Result<u64> {
+    let verifier = rpc
+        .view(rollup, "VERIFIER", json!("latest"))
+        .await?
+        .to_be_bytes::<32>();
+    let verifier = Address::from_slice(&verifier[12..]);
+    let data = commitStateCall {
+        updates: payload.to_vec().into(),
+        proof: vec![255u8; 356].into(),
+    }
+    .abi_encode();
+    let overrides = json!({format!("{verifier}"): {"code":"0x00"}});
+    let estimate = rpc.call("eth_estimateGas", json!([
+        {"to":rollup,"data":format!("0x{}",hex::encode(data)),"gas":format!("0x{:x}",b.total_limit)}, "latest", overrides
+    ])).await?;
+    let measured: u64 = quantity(&estimate)?.try_into()?;
+    measured
+        .checked_add(b.fixed_execution)
+        .and_then(|v| v.checked_mul(6))
+        .and_then(|v| v.checked_add(4))
+        .map(|v| v / 5)
+        .context("gas estimate overflow")
 }
 async fn preflight(rpc: &Rpc, input: &Input, t: &Transition) -> Result<()> {
     let head = rpc
@@ -304,14 +360,44 @@ async fn prove_and_send(
         .open(std::env::temp_dir().join(format!("m3ter-prover-{}.lock", signer.address())))?;
     lock.try_lock_exclusive()
         .context("another prover batch is using this wallet")?;
+    if out.join("transaction.json").exists() {
+        return recover_transaction(rpc, input, t, out).await;
+    }
     preflight(rpc, input, t).await?;
-    let (_, estimated) = b.estimate(&t.updates.iter().map(|u| u.old).collect::<Vec<_>>())?;
-    let estimated = estimated
-        .checked_mul(6)
-        .and_then(|x| x.checked_add(4))
-        .map(|x| x / 5)
-        .ok_or_else(|| anyhow!("gas budget overflow"))?;
+    let estimated = estimate_update_gas(rpc, input.rollup, &t.payload, b).await?;
+    ensure!(
+        estimated <= b.total_limit.min(b.execution_limit),
+        "live gas estimate now exceeds budget; do not buy a proof"
+    );
     funding(rpc, signer.address(), estimated).await?;
+    // SP1 6.3.1: first four bytes of SHA-256(groth16_vk.bin).
+    // Check the actual gateway route before purchasing a proof.
+    let verifier = rpc
+        .view(input.rollup, "VERIFIER", json!("latest"))
+        .await?
+        .to_be_bytes::<32>();
+    let gateway = Address::from_slice(&verifier[12..]);
+    let mut route_data = keccak256("routes(bytes4)").as_slice()[..4].to_vec();
+    route_data.extend([0x43, 0x88, 0xa2, 0x1c]);
+    route_data.extend([0u8; 28]);
+    let route = rpc
+        .call(
+            "eth_call",
+            json!([{"to":gateway,"data":format!("0x{}",hex::encode(route_data))},"latest"]),
+        )
+        .await?;
+    let route = hex::decode(
+        route
+            .as_str()
+            .context("invalid verifier route response")?
+            .trim_start_matches("0x"),
+    )?;
+    ensure!(
+        route.len() == 64
+            && route[..32].iter().any(|x| *x != 0)
+            && route[32..].iter().all(|x| *x == 0),
+        "SP1 verifier route missing or frozen; do not buy a proof"
+    );
     let network_key = required("SP1_PRIVATE_KEY")?;
     let network_signer = NetworkSigner::local(&network_key)?;
     let client = ProverClient::builder()
@@ -328,70 +414,133 @@ async fn prove_and_send(
         B256::from(onchain.to_be_bytes::<32>()) == B256::from_str(&pk.verifying_key().bytes32())?,
         "deployed program key differs from prover guest"
     );
-    let mut stdin = SP1Stdin::new();
-    stdin.write(input);
-    // Execute locally before requesting a paid proof. Compare complete public values.
-    let (public, report) = client
-        .execute(elf, stdin.clone())
-        .cycle_limit(env_u64("MAX_PROVER_CYCLES", 100_000_000)?)
-        .calculate_gas(true)
-        .await?;
-    ensure!(
-        public.as_slice() == t.public_values.as_slice(),
-        "guest/host statement mismatch"
-    );
-    let cycles = report
-        .total_instruction_count()
-        .checked_mul(110)
-        .and_then(|v| v.checked_div(100))
-        .ok_or_else(|| anyhow!("cycle overflow"))?;
-    let pgu = report
-        .gas()
-        .ok_or_else(|| anyhow!("SP1 execution did not report PGU"))?
-        .checked_mul(110)
-        .and_then(|v| v.checked_div(100))
-        .ok_or_else(|| anyhow!("PGU overflow"))?;
-    ensure!(
-        cycles <= env_u64("MAX_PROVER_CYCLES", 100_000_000)?
-            && pgu <= env_u64("MAX_PROVER_PGU", 100_000_000)?,
-        "batch exceeds configured proving budget; reduce MAX_SLOTS/MAX_ACTIONS"
-    );
-    let price = required("MAX_PRICE_PER_PGU")?.parse::<u64>()?;
-    let params = client
-        .get_proof_request_params(SP1ProofMode::Groth16)
-        .await?;
-    let params = match params {
-        sp1_sdk::network::proto::GetProofRequestParamsResponse::Auction(p) => p,
-        _ => bail!("network does not provide auction prices"),
+    let timeout = Some(std::time::Duration::from_secs(env_u64(
+        "PROOF_TIMEOUT_SECONDS",
+        3600,
+    )?));
+    let proof = if out.join("proof.bin").exists() {
+        sp1_sdk::SP1ProofWithPublicValues::load(out.join("proof.bin"))?
+    } else if out.join("request.json").exists() {
+        let saved: Value = serde_json::from_slice(&std::fs::read(out.join("request.json"))?)?;
+        let request_id = B256::from_str(
+            saved["request_id"]
+                .as_str()
+                .context("missing SP1 request ID")?,
+        )?;
+        client.wait_proof(request_id, timeout, None).await?
+    } else {
+        ensure!(
+            !out.join("paid-attempt.json").exists(),
+            "ambiguous paid request: inspect network history before any new request"
+        );
+        let mut stdin = SP1Stdin::new();
+        stdin.write(input);
+        // Execute locally before requesting a paid proof. Compare complete public values.
+        let execution = client
+            .execute(elf, stdin.clone())
+            .cycle_limit(env_u64("MAX_PROVER_CYCLES", 100_000_000)?)
+            .calculate_gas(true)
+            .await;
+        if let Err(error) = &execution {
+            if error.to_string().contains("exceeded cycle limit") {
+                durable_json(
+                    &out.join("reduce-batch.json"),
+                    &json!({"reason":"cycle limit"}),
+                )?;
+            }
+        }
+        let (public, report) = execution?;
+        ensure!(
+            public.as_slice() == t.public_values.as_slice(),
+            "guest/host statement mismatch"
+        );
+        let cycles = report
+            .total_instruction_count()
+            .checked_mul(110)
+            .and_then(|v| v.checked_div(100))
+            .ok_or_else(|| anyhow!("cycle overflow"))?;
+        let pgu = report
+            .gas()
+            .ok_or_else(|| anyhow!("SP1 execution did not report PGU"))?
+            .checked_mul(110)
+            .and_then(|v| v.checked_div(100))
+            .ok_or_else(|| anyhow!("PGU overflow"))?;
+        if cycles > env_u64("MAX_PROVER_CYCLES", 100_000_000)?
+            || pgu > env_u64("MAX_PROVER_PGU", 100_000_000)?
+        {
+            durable_json(
+                &out.join("reduce-batch.json"),
+                &json!({"reason":"cycle/PGU admission"}),
+            )?;
+            bail!("batch exceeds configured proving budget; reduce action count before purchasing");
+        }
+        let params = client
+            .get_proof_request_params(SP1ProofMode::Groth16)
+            .await?;
+        let params = match params {
+            sp1_sdk::network::proto::GetProofRequestParamsResponse::Auction(p) => p,
+            _ => bail!("network does not provide auction prices"),
+        };
+        let price = match std::env::var("MAX_PRICE_PER_PGU").as_deref() {
+            Ok("auto") => params.max_price_per_pgu.parse::<u64>()?,
+            Ok(value) => value.parse::<u64>()?,
+            Err(_) => bail!("set MAX_PRICE_PER_PGU to auto or an explicit PROVE-wei cap"),
+        };
+        ensure!(
+            params.tick_size == 0 || price % params.tick_size == 0,
+            "MAX_PRICE_PER_PGU must be a multiple of the auction tick"
+        );
+        let base = params.base_fee.parse::<u64>()?;
+        let reserve = U256::from_str(&required("SP1_CREDIT_RESERVE_WEI")?)?;
+        let cost = U256::from(pgu)
+            .checked_mul(U256::from(price))
+            .and_then(|x| x.checked_add(U256::from(base)))
+            .and_then(|x| x.checked_add(reserve))
+            .ok_or_else(|| anyhow!("credit cost overflow"))?;
+        ensure!(
+            client.get_balance().await? >= cost,
+            "insufficient SP1 network credits (PROVE wei)"
+        );
+        if let Ok(cap) = std::env::var("MAX_PROOF_COST_WEI") {
+            if !cap.is_empty() {
+                let cap = U256::from_str(&cap)?;
+                ensure!(
+                    cost.checked_sub(reserve).is_some_and(|v| v <= cap),
+                    "proof quote exceeds MAX_PROOF_COST_WEI"
+                );
+            }
+        }
+        preflight(rpc, input, t).await?;
+        funding(rpc, signer.address(), estimated).await?;
+        // Durable marker BEFORE any paid request. An ambiguous failure pauses the scheduler,
+        // including after a restart, instead of buying the same proof again.
+        let marker = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(out.join("paid-attempt.json"))?;
+        serde_json::to_writer_pretty(
+            &marker,
+            &json!({"cycles":cycles,"pgu":pgu,"price_per_pgu":price,"maximum_cost_wei":cost.checked_sub(reserve),"program_vkey":pk.verifying_key().bytes32()}),
+        )?;
+        marker.sync_all()?;
+        let request_id = client
+            .prove(&pk, stdin)
+            .groth16()
+            .cycle_limit(cycles)
+            .gas_limit(pgu)
+            .max_price_per_pgu(price)
+            .timeout(std::time::Duration::from_secs(env_u64(
+                "PROOF_TIMEOUT_SECONDS",
+                3600,
+            )?))
+            .request()
+            .await?;
+        durable_json(
+            &out.join("request.json"),
+            &json!({"request_id": request_id}),
+        )?;
+        client.wait_proof(request_id, timeout, None).await?
     };
-    ensure!(
-        params.tick_size == 0 || price % params.tick_size == 0,
-        "MAX_PRICE_PER_PGU must be a multiple of the auction tick"
-    );
-    let base = params.base_fee.parse::<u64>()?;
-    let reserve = U256::from_str(&required("SP1_CREDIT_RESERVE_WEI")?)?;
-    let cost = U256::from(pgu)
-        .checked_mul(U256::from(price))
-        .and_then(|x| x.checked_add(U256::from(base)))
-        .and_then(|x| x.checked_add(reserve))
-        .ok_or_else(|| anyhow!("credit cost overflow"))?;
-    ensure!(
-        client.get_balance().await? >= cost,
-        "insufficient SP1 network credits (PROVE wei)"
-    );
-    preflight(rpc, input, t).await?;
-    funding(rpc, signer.address(), estimated).await?;
-    let proof = client
-        .prove(&pk, stdin)
-        .groth16()
-        .cycle_limit(cycles)
-        .gas_limit(pgu)
-        .max_price_per_pgu(price)
-        .timeout(std::time::Duration::from_secs(env_u64(
-            "PROOF_TIMEOUT_SECONDS",
-            3600,
-        )?))
-        .await?;
     client.verify(&proof, pk.verifying_key(), None)?;
     ensure!(
         proof.public_values.as_slice() == t.public_values.as_slice(),
@@ -410,6 +559,7 @@ async fn prove_and_send(
         quantity(&rpc.call("eth_estimateGas", json!([request])).await?)?.try_into()?;
     let gas = actual
         .checked_mul(120)
+        .and_then(|v| v.checked_add(99))
         .and_then(|v| v.checked_div(100))
         .ok_or_else(|| anyhow!("gas overflow"))?;
     ensure!(
@@ -417,20 +567,33 @@ async fn prove_and_send(
         "final gas with 20% headroom exceeds budget; keep proof, do not send"
     );
     let (max_fee, priority) = funding(rpc, signer.address(), gas).await?;
-    let provider = ProviderBuilder::new()
-        .wallet(signer)
-        .connect_http(rpc.url.parse()?);
+    let nonce: u64 = quantity(
+        &rpc.call(
+            "eth_getTransactionCount",
+            json!([signer.address(), "pending"]),
+        )
+        .await?,
+    )?
+    .try_into()?;
+    let wallet = EthereumWallet::from(signer);
     let tx = TransactionRequest::default()
         .to(input.rollup)
         .input(Bytes::from(data).into())
+        .nonce(nonce)
+        .chain_id(input.chain_id.try_into()?)
         .gas_limit(gas)
         .max_fee_per_gas(max_fee)
         .max_priority_fee_per_gas(priority);
-    let pending = provider.send_transaction(tx).await?;
-    std::fs::write(
-        out.join("transaction.json"),
-        serde_json::to_vec_pretty(&json!({"hash":pending.tx_hash()}))?,
+    let signed = tx.build(&wallet).await?;
+    let raw = signed.encoded_2718();
+    // Save signed bytes BEFORE broadcasting. Recovery rebroadcasts the identical
+    // transaction/hash, never a newly signed transaction with a second nonce.
+    durable_json(
+        &out.join("transaction.json"),
+        &json!({"hash":signed.tx_hash(),"raw":format!("0x{}",hex::encode(&raw))}),
     )?;
+    let provider = ProviderBuilder::new().connect_http(rpc.url.parse()?);
+    let pending = provider.send_raw_transaction(&raw).await?;
     let receipt = pending
         .with_required_confirmations(env_u64("CONFIRMATIONS", 2)?)
         .get_receipt()
@@ -462,6 +625,74 @@ async fn prove_and_send(
         );
         reconcile(input, t).await?;
     }
+    std::fs::write(
+        out.join("complete.json"),
+        serde_json::to_vec(&json!({"transaction":receipt.transaction_hash}))?,
+    )?;
+    Ok(())
+}
+fn durable_json(path: &Path, value: &Value) -> Result<()> {
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    serde_json::to_writer(&file, value)?;
+    file.sync_all()?;
+    if let Some(parent) = path.parent() {
+        std::fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+#[cfg(feature = "proving")]
+async fn recover_transaction(rpc: &Rpc, input: &Input, t: &Transition, out: &Path) -> Result<()> {
+    ensure!(
+        quantity(&rpc.call("eth_chainId", json!([])).await?)? == input.chain_id,
+        "wrong recovery chain"
+    );
+    let saved: Value = serde_json::from_slice(&std::fs::read(out.join("transaction.json"))?)?;
+    let hash = saved["hash"].as_str().context("missing transaction hash")?;
+    if let Some(raw) = saved["raw"].as_str() {
+        ensure!(
+            format!("{}", keccak256(hex::decode(raw.trim_start_matches("0x"))?)) == hash,
+            "saved transaction hash mismatch"
+        );
+        let _ = rpc.call("eth_sendRawTransaction", json!([raw])).await;
+    }
+    let receipt = rpc
+        .call("eth_getTransactionReceipt", json!([hash]))
+        .await
+        .context("transaction still pending; retry recovery later")?;
+    ensure!(
+        quantity(&receipt["status"])? == U256::from(1),
+        "transaction reverted; manual review required"
+    );
+    let number: u64 = quantity(&receipt["blockNumber"])?.try_into()?;
+    let head: u64 = quantity(&rpc.call("eth_blockNumber", json!([])).await?)?.try_into()?;
+    ensure!(
+        head.saturating_sub(number) + 1 >= env_u64("CONFIRMATIONS", 2)?,
+        "awaiting confirmations"
+    );
+    let block = rpc
+        .call(
+            "eth_getBlockByNumber",
+            json!([receipt["blockNumber"], false]),
+        )
+        .await?;
+    ensure!(
+        block["hash"] == receipt["blockHash"],
+        "receipt is not canonical"
+    );
+    std::fs::write(
+        out.join("receipt.json"),
+        serde_json::to_vec_pretty(&receipt)?,
+    )?;
+    if std::env::var_os("ACTIONS_FILE").is_none() {
+        reconcile(input, t).await?;
+    }
+    if !out.join("complete.json").exists() {
+        durable_json(&out.join("complete.json"), &json!({"transaction":hash}))?;
+    }
+    println!("Recovered committed transaction {hash}");
     Ok(())
 }
 #[cfg(feature = "proving")]
@@ -516,16 +747,45 @@ async fn execute_fixture() -> Result<()> {
     );
     Ok(())
 }
+#[cfg(feature = "proving")]
+async fn network_status() -> Result<()> {
+    use sp1_sdk::{
+        network::{signer::NetworkSigner, NetworkMode},
+        ProverClient, SP1ProofMode,
+    };
+    let client = ProverClient::builder()
+        .network_for(NetworkMode::Mainnet)
+        .signer(NetworkSigner::local(&required("SP1_PRIVATE_KEY")?)?)
+        .build()
+        .await;
+    println!("SP1 balance (PROVE wei): {}", client.get_balance().await?);
+    match client
+        .get_proof_request_params(SP1ProofMode::Groth16)
+        .await?
+    {
+        sp1_sdk::network::proto::GetProofRequestParamsResponse::Auction(p) => println!(
+            "Network quote: {} PROVE wei/PGU; base fee {} PROVE wei; tick {}",
+            p.max_price_per_pgu, p.base_fee, p.tick_size
+        ),
+        _ => bail!("unsupported network pricing mode"),
+    }
+    Ok(())
+}
 #[tokio::main]
 async fn main() -> Result<()> {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "plan".into());
+    #[cfg(feature = "proving")]
+    if mode == "network-status" {
+        return network_status().await;
+    }
+
     #[cfg(feature = "proving")]
     if mode == "execute-fixture" {
         return execute_fixture().await;
     }
     ensure!(
-        mode == "plan" || mode == "run",
-        "usage: prover-rollup-host [plan|run]"
+        mode == "plan" || mode == "run" || mode == "recover",
+        "usage: m3tering-prover [plan|run|recover|execute-fixture]"
     );
     let rpc = Rpc {
         url: required("RPC_URL")?,
@@ -538,6 +798,32 @@ async fn main() -> Result<()> {
         std::env::var("OUTPUT_DIR").unwrap_or_else(|_| "prover-output".into()),
     );
     std::fs::create_dir_all(&out)?;
+    if mode == "recover" {
+        #[cfg(feature = "proving")]
+        {
+            ensure!(
+                out.join("paid-attempt.json").exists(),
+                "no paid attempt to recover"
+            );
+            let input: Input = serde_json::from_slice(&std::fs::read(out.join("input.json"))?)?;
+            ensure!(input.rollup == rollup, "recovery Rollup mismatch");
+            let t = transition::execute(&input).map_err(|e| anyhow!(e))?;
+            let head = rpc
+                .call("eth_getBlockByNumber", json!(["latest", false]))
+                .await?;
+            return prove_and_send(
+                &rpc,
+                &input,
+                &t,
+                budget(quantity(&head["gasLimit"])?.try_into()?)?,
+                &out,
+            )
+            .await;
+        }
+        #[cfg(not(feature = "proving"))]
+        bail!("recovery requires --features proving");
+    }
+
     ensure!(!out.join("proof.bin").exists() && !out.join("transaction.json").exists(),"OUTPUT_DIR contains a paid proof or transaction: choose a new directory; do not overwrite it");
     let (input, t, b) = plan(&rpc, rollup).await?;
     std::fs::write(out.join("input.json"), serde_json::to_vec_pretty(&input)?)?;
