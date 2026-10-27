@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "$0")/.."
+# Panic locations are part of the guest image and therefore its verification key.
+# Preserve the dependency-path prefix used by the deployed Sepolia guest without
+# requiring contributors to create that directory on their own machines.
+guest_cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+cargo prove build --locked -p m3tering-program --output-directory elf \
+  "--rustflags=--remap-path-prefix=$guest_cargo_home=/tmp/native-cargo"

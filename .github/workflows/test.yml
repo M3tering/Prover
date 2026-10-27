@@ -20,7 +20,9 @@ jobs:
           "$HOME/.sp1/bin/sp1up" --version v6.3.1
           echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
       - name: Build guest
-        run: cargo prove build --locked -p m3tering-program --output-directory elf
+        run: |
+          ./ops/build-guest
+          cmp release/program.elf elf/m3tering-program
       - name: Execute authenticated fixture without buying a proof
         env:
           SP1_ELF: elf/m3tering-program

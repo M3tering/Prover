@@ -106,14 +106,16 @@ Use Rust **1.99.1** and SP1 **6.3.1**. The proving-enabled host needs protobuf/p
 cargo fmt --all -- --check
 cargo test --locked -p m3tering-protocol -p m3tering-prover
 cargo build --locked -p m3tering-prover --features proving
-cargo prove build --locked -p m3tering-program --output-directory elf
+./ops/build-guest
 SP1_ELF=elf/m3tering-program WITNESS_FILE=fixtures/input.json \
   cargo run --locked -p m3tering-prover --features proving -- execute-fixture
 ```
 
 `execute-fixture` executes the actual guest locally, verifies that its public output matches the shared transition code and prints the program verification key. It neither buys a proof nor submits an Ethereum transaction. Re-derive the key after changing the guest, dependencies or toolchain. Set that key and the target-chain verifier/M3ter addresses before deployment. The Sepolia Rollup permits only its deploying wallet to change the vkey and disables that setter on other chains.
 
-When releasing a guest change, copy the rebuilt `elf/m3tering-program` to `release/program.elf`, regenerate `release/program.sha256` with `sha256sum release/program.elf`, and update `release/program-build.json` with the new key, checksum and source revision. Commit these together with the source change. The Protocol workflow rebuilds the guest and checks its verification key against that manifest; the image workflow checks and executes the packaged guest. Review both workflows before deploying a new release.
+The guest build script normalizes dependency paths embedded in Rust panic locations to the original build's prefix. Those bytes affect the verification key even when execution is otherwise identical. This does not require creating that directory locally. CI requires the rebuilt guest to match the packaged ELF byte for byte.
+
+When releasing a guest change, copy the rebuilt `elf/m3tering-program` to `release/program.elf`, regenerate `release/program.sha256` with `sha256sum release/program.elf`, and update `release/program-build.json` with the new key, checksum and source revision. Commit these together with the source change. The Protocol workflow also checks the rebuilt guest's verification key against that manifest; the image workflow checks and executes the packaged guest. Review both workflows before deploying a new release.
 
 To regenerate the cross-language fixtures:
 
