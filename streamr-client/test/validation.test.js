@@ -9,22 +9,30 @@ function signed(id, nonce, energy = 600) {
   const message = Buffer.alloc(8); message.writeUInt32BE(nonce); message.writeUInt32BE(energy, 4)
   return { m3ter_id: id, message: message.toString('hex') + Buffer.from(ed25519.sign(message, secret)).toString('hex') }
 }
-test('wire compatibility, exact lengths, signed fields and capacity', () => {
+test('wire prefix, signed fields and capacity', () => {
   const action = decode({ ...signed(22, 1), nonce: 999, energy: 999 })
   assert.equal(action.nonce, 1); assert.equal(action.energy, 600); authenticate(action, key)
-  for (const value of [signed(-1,1), signed(17179869184,1), signed(1,0), signed(1,16777216), {m3ter_id:1,message:signed(1,1).message+'00'}]) assert.throws(()=>decode(value))
+  for (const value of [signed(-1,1), signed(17179869184,1), signed(1,0), signed(1,16777216), {m3ter_id:1,message:signed(1,1).message.slice(0,-2)}]) assert.throws(()=>decode(value))
+  for (const suffix of ['00'.repeat(500), 'garbage', 'f']) {
+    const tailed = decode({m3ter_id:22,message:'0X'+signed(22,1).message+suffix})
+    assert.deepEqual(tailed, action); authenticate(tailed,key)
+  }
+  assert.throws(()=>decode({m3ter_id:22,message:'zz'+signed(22,1).message}))
   const tampered = { ...action, message: '00000001000007d0' }
   assert.throws(()=>authenticate(tampered,key)); assert.throws(()=>authenticate(action,'00'.repeat(32)))
   assert.throws(()=>authenticate({...action,signature:'00'.repeat(64)},key))
 })
-test('all actions are validated before any database writes', async () => {
+test('invalid entries are discarded without DB writes; RPC failures remain retryable', async () => {
   let writes = 0
   const db = { tx: async () => { writes++ } }
   const chain = { snapshot: async () => ({meter: async () => ({key,nonce:0})}) }
   const bad = signed(23,1); bad.message = bad.message.slice(0,16) + '00'.repeat(64)
-  await assert.rejects(ingest(db,chain,[signed(22,1),bad],'https')); assert.equal(writes,0)
-  await assert.rejects(ingest(db,chain,[signed(22,1),signed(22,1,1000)],'https')); assert.equal(writes,0)
-  await assert.rejects(ingest(db,{snapshot:async()=>({meter:async()=>({key,nonce:1})})},[signed(22,1)],'https'))
+  assert.deepEqual(await ingest(db,chain,[bad,{message:'bad'},null,signed(1,0)],'https'),{accepted:0,duplicates:0,discarded:4})
+  assert.deepEqual(await ingest(db,{snapshot:async()=>({meter:async()=>({key,nonce:1})})},[signed(22,1)],'https'),{accepted:0,duplicates:0,discarded:1})
+  assert.deepEqual(await ingest(db,chain,[],'https'),{accepted:0,duplicates:0,discarded:0})
+  const unavailable={snapshot:async()=>({meter:async id=>{if(id===23)throw Error('RPC unavailable');return {key,nonce:0}}})}
+  await assert.rejects(ingest(db,unavailable,[signed(22,1),signed(23,1)],'https'),/RPC unavailable/)
+  assert.equal(writes,0)
 })
 test('nonce gaps do not block other meters; consecutive actions aggregate before flooring', async () => {
   const rows = [signed(1,2),signed(2,1),signed(2,2)].map((x,i)=>({...decode(x),id:i+1}))

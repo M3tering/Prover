@@ -17,7 +17,11 @@ function decode(item) {
   if (!item || !Number.isSafeInteger(item.m3ter_id) || item.m3ter_id < 0 || item.m3ter_id > 17179869183) {
     throw new InvalidPayload('m3ter_id must be an integer in 0..17179869183')
   }
-  const packed = hex(item.message, 72)
+  // Only the signed 8-byte message and its 64-byte signature enter validation/storage.
+  // Ignore the suffix entirely, including data that is not hexadecimal.
+  const raw = item.message
+  const start = typeof raw === 'string' && raw.slice(0, 2).toLowerCase() === '0x' ? 2 : 0
+  const packed = hex(typeof raw === 'string' ? raw.slice(start, start + 144) : raw, 72)
   const bytes = Buffer.from(packed, 'hex')
   const nonce = bytes.readUInt32BE(0)
   if (nonce < 1 || nonce > 16777215) throw new InvalidPayload('nonce must be in 1..16777215')
@@ -65,32 +69,44 @@ class Chain {
   }
 }
 async function ingest(db, chain, items, source, max = 1000) {
-  if (!Array.isArray(items) || !items.length || items.length > max) throw new InvalidPayload(`batch must contain 1..${max} actions`)
-  // Validate the entire batch before inserting anything. Ignore unsigned metadata.
-  const actions = items.map(decode), snapshot = await chain.snapshot()
-  const seen = new Map()
+  const entries = Array.isArray(items) ? items : [items]
+  if (entries.length > max) {
+    const error = new Error(`batch exceeds ${max} actions`); error.status = 413; throw error
+  }
+  const counts = { accepted: 0, duplicates: 0, discarded: 0 }, actions = [], valid = []
+  for (const item of entries) {
+    try { actions.push(decode(item)) }
+    catch (error) { if (!(error instanceof InvalidPayload)) throw error; counts.discarded++ }
+  }
+  if (!actions.length) return counts
+  // RPC failures must remain retryable errors, not successful discards. Complete
+  // chain validation before starting the DB transaction to avoid partial writes.
+  const snapshot = await chain.snapshot()
   for (const action of actions) {
     const state = await snapshot.meter(action.m3ter_id)
-    authenticate(action, state.key)
-    if (action.nonce <= state.nonce) throw new InvalidPayload(`nonce already consumed for meter ${action.m3ter_id}`)
-    const k = `${action.m3ter_id}:${action.nonce}`
-    if (seen.has(k) && seen.get(k).message !== action.message) throw new InvalidPayload('conflicting nonce in batch')
-    seen.set(k, action)
+    if (action.nonce <= state.nonce) { counts.discarded++; continue }
+    try { authenticate(action, state.key) }
+    catch (error) { if (!(error instanceof InvalidPayload)) throw error; counts.discarded++; continue }
+    valid.push(action)
   }
+  if (!valid.length) return counts
+  // Acquire unique-index locks in a consistent order across concurrent requests.
+  // Stable sorting preserves first-valid-wins for conflicting entries in a batch.
+  valid.sort((a,b) => a.m3ter_id - b.m3ter_id || a.nonce - b.nonce)
   return db.tx(async tx => {
-    let inserted = 0
-    for (const action of seen.values()) {
+    for (const action of valid) {
       const row = await tx.oneOrNone(`INSERT INTO m3ter_payloads
         (m3ter_id,nonce,energy,message,signature,is_verified,source,queue_status)
         VALUES ($1,$2,$3,$4,$5,false,$6,'pending') ON CONFLICT (m3ter_id,nonce) DO NOTHING RETURNING id`,
       [action.m3ter_id, action.nonce, action.energy, action.message, action.signature, source])
-      if (row) inserted++
+      if (row) counts.accepted++
       else {
         const prior = await tx.one('SELECT message,signature FROM m3ter_payloads WHERE m3ter_id=$1 AND nonce=$2', [action.m3ter_id, action.nonce])
-        if (prior.message !== action.message || prior.signature !== action.signature) throw new InvalidPayload('conflicting action already queued for this nonce')
+        if (prior.message === action.message && prior.signature === action.signature) counts.duplicates++
+        else counts.discarded++
       }
     }
-    return { accepted: inserted, duplicates: actions.length - inserted }
+    return counts
   })
 }
 module.exports = { decode, authenticate, Chain, InvalidPayload, ingest }
