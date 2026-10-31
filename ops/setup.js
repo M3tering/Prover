@@ -14,7 +14,7 @@ async function main(){
   env.SP1_PRIVATE_KEY=await ask('SP1 key (hidden; Enter to use the Ethereum key)',true)||env.PRIVATE_KEY
   if(!/^(0x)?[0-9a-fA-F]{64}$/.test(env.SP1_PRIVATE_KEY))throw new Error('Invalid SP1 key')
   env.STREAM_ID=await ask('Streamr stream ID (Enter to disable Streamr)')
-  env.PROVE_INTERVAL_SECONDS=await ask('Proof interval in seconds [3600]')||'3600'
+  env.PROVE_INTERVAL_SECONDS=await ask('Proof interval in seconds [43200]')||'43200'
   if(!/^\d+$/.test(env.PROVE_INTERVAL_SECONDS)||Number(env.PROVE_INTERVAL_SECONDS)<30)throw new Error('Interval must be at least 30 seconds')
   env.MAX_PRICE_PER_PGU='auto';env.PROVING_ENABLED=(await ask('Enable paid scheduled proving? [yes/no]')).toLowerCase()==='yes'?'true':'false'
   env.MAX_PROOF_COST_WEI=await ask('Optional maximum PROVE wei per proof (Enter for live network quote)')

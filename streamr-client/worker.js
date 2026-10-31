@@ -50,7 +50,7 @@ function startWorker(db, chain, state) {
     return true
   } })
   let stopping = false, child, timer, activeTask = Promise.resolve()
-  const interval = Number(process.env.PROVE_INTERVAL_SECONDS || 3600)
+  const interval = Number(process.env.PROVE_INTERVAL_SECONDS || 43200)
   if (!Number.isSafeInteger(interval) || interval < 30) throw new Error('PROVE_INTERVAL_SECONDS must be >=30')
   async function runHost(out, command, maxActions = process.env.MAX_ACTIONS || 10000) {
     const logfile = fs.openSync(path.join(out, 'host.log'), 'a', 0o600)

@@ -60,6 +60,7 @@ services:
   worker:
     <<: *node
     mem_limit: ${WORKER_MEMORY:-4g}
+    shm_size: ${WORKER_SHM_SIZE:-1g}
     command: [node, worker-main.js]
     environment:
       <<: *environment
@@ -68,7 +69,7 @@ services:
       SP1_ELF: /opt/m3tering/release/program.elf
       SP1_CACHE_DIR: /data/cache
       PROVING_ENABLED: ${PROVING_ENABLED:-false}
-      PROVE_INTERVAL_SECONDS: ${PROVE_INTERVAL_SECONDS:-3600}
+      PROVE_INTERVAL_SECONDS: ${PROVE_INTERVAL_SECONDS:-43200}
       MAX_ACTIONS: ${MAX_ACTIONS:-10000}
       MAX_SLOTS: ${MAX_SLOTS:-4096}
       GAS_SCHEDULE: ${GAS_SCHEDULE:-current}
