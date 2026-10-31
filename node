@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "$0")"
+case "${1:-help}" in
+  setup) docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203 node ops/setup.js ;;
+  start) docker compose up -d --no-build --pull missing ;;
+  update) docker compose pull; docker compose up -d --no-build ;;
+  build) docker compose build ;;
+  stop) docker compose stop ;;
+  status) docker compose ps; docker compose exec -T worker node -e 'console.log(require("fs").readFileSync("/data/status.json","utf8"))' ;;
+  logs) docker compose logs --tail 100 -f "${2:-worker}" ;;
+  plan) docker compose exec -e OUTPUT_DIR=/tmp/prover-plan worker m3tering-prover plan ;;
+  network) docker compose exec worker m3tering-prover network-status ;;
+  recover) test -n "${2:-}" || { echo 'Usage: ./node recover /data/batches/BATCH'; exit 1; }; docker compose exec -e OUTPUT_DIR="$2" worker m3tering-prover recover ;;
+  backup) mkdir -p backups; umask 077; docker compose exec -T db pg_dump -U m3tering -d m3tering -Fc > "backups/queue-$(date -u +%Y%m%dT%H%M%SZ).dump"; echo 'Database backup written to backups/ (also preserve the proofs volume).' ;;
+  *) echo 'Usage: ./node {setup|start|update|build|stop|status|logs [api|worker]|plan|network|recover BATCH|backup}' ;;
+esac

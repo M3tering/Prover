@@ -1,0 +1,10 @@
+# Build only from a verified local release artifact; normal source builds use ../Dockerfile.
+ARG API_IMAGE=m3tering-api:polar-bear
+FROM ${API_IMAGE}
+COPY m3tering-prover /usr/local/bin/m3tering-prover
+COPY program.elf program.sha256 program-build.json /opt/m3tering/release/
+WORKDIR /opt/m3tering
+RUN sha256sum -c release/program.sha256
+ENV SP1_ELF=/opt/m3tering/release/program.elf BATCH_DIR=/data/batches
+WORKDIR /app
+CMD ["node", "worker-main.js"]

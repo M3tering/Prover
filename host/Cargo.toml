@@ -1,0 +1,21 @@
+[package]
+name = "m3tering-prover"
+version = "0.1.0"
+edition = "2021"
+[features]
+default = []
+proving = ["dep:sp1-sdk"]
+[dependencies]
+m3tering-protocol = { path = "../lib" }
+alloy = { version = "1.0.13", features = ["full"] }
+alloy-sol-types = { workspace = true }
+alloy-primitives = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+hex = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+anyhow = "1"
+fs2 = "0.4"
+tokio-postgres = "0.7"
+sp1-sdk = { version = "=6.3.1", default-features = false, features = ["network"], optional = true }
