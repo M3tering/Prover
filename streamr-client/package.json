@@ -5,14 +5,19 @@
   "main": "index.js",
   "scripts": {
     "start": "node ./index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/*.test.js"
   },
   "author": "Godwin",
   "license": "MIT",
   "dependencies": {
-    "@streamr/sdk": "^103.1.0",
+    "@noble/curves": "1.9.7",
+    "@streamr/sdk": "103.4.0",
+    "dotenv": "^17.2.3",
+    "ethers": "6.17.0",
     "express": "^5.1.0",
-    "pg-promise": "^12.2.0",
-    "dotenv": "^17.2.3"
+    "pg-promise": "^12.2.0"
+  },
+  "overrides": {
+    "tar": "7.5.22"
   }
 }

@@ -1,0 +1,59 @@
+{
+  "chain_id": "0x1",
+  "rollup": "0x1111111111111111111111111111111111111111",
+  "words": {
+    "0": "0x1000000000a",
+    "1": "0x0",
+    "1000": "0x0"
+  },
+  "keys": {
+    "0": [
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61"
+    ],
+    "1": [
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61"
+    ],
+    "1000": [
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "0x197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61"
+    ]
+  },
+  "actions": {
+    "0": [
+      {
+        "message": "0000000200006400",
+        "signature": "6afae38bd225b8c65cec0fc5c4dbe5e9ef41dd8e0a44e8cb97c4d22dfbe38411c7913d8de8e1b5f2151ecd2a034067aca9ad2d0f0d32a5fac25c23727856f108"
+      },
+      {
+        "message": "00000003000015e0",
+        "signature": "c54751989ece7c30de0edcb642bb863aef71f10953ea5a7af4a4871944ed17087da0f473f95e5aa3c66be99d4df962976a5f5163cb716e616a2c8b76e9a7a102"
+      }
+    ],
+    "3": [
+      {
+        "message": "000000010001869f",
+        "signature": "7bbacda2f4dc4adbdb5e400fee5675424af5359fe3b02887fdf7c4ca02647fbc5b74e2f6b3b7d1c5c03ebdd1ab3a41158f656efc2b94ebfba853e4f48cc6c401"
+      }
+    ],
+    "4": [
+      {
+        "message": "0000000100000258",
+        "signature": "15b3392f51d234f2a1cd643678ed64a39ea7720b93b46598a7dfe7bf773800c990b705587dc338a9ec7074e180267eefcaf05d911875cfa3e17419d2b4628603"
+      }
+    ],
+    "4000": [
+      {
+        "message": "0000000100001b58",
+        "signature": "3a09064bb641673a256f6f5205384341c95cb065d29d43ea77f8e171c1c3a3961656c57eef52a0c93b78365c96d3f92253306f8c16b5b22512c34e5d1a5d9c0c"
+      }
+    ]
+  }
+}

@@ -1,0 +1,101 @@
+name: Publish prover images
+on:
+  push:
+    branches: [propter-polar-bear]
+    tags: ['prover-v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: prover-images-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0
+        env: {POSTGRES_USER: m3tering, POSTGRES_PASSWORD: validation-only, POSTGRES_DB: m3tering}
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U m3tering" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.16.0'
+          cache: npm
+          cache-dependency-path: streamr-client/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev protobuf-compiler
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked -p m3tering-protocol -p m3tering-prover
+      - run: npm ci --prefix streamr-client
+      - run: npm test --prefix streamr-client
+        env:
+          TEST_DATABASE_URL: postgres://m3tering:validation-only@localhost:5432/m3tering
+      - run: sha256sum -c release/program.sha256
+  images:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: api
+            suffix: '-api'
+          - target: worker
+            suffix: ''
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/m3tering/prover
+          tags: |
+            type=ref,event=branch,suffix=${{ matrix.suffix }}
+            type=ref,event=tag,suffix=${{ matrix.suffix }}
+            type=sha,format=long,suffix=${{ matrix.suffix }}
+          flavor: latest=false
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+      - name: Smoke-test the built image before publication
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          image=$(printf '%s\n' "$IMAGE_TAGS" | head -1)
+          if [ "$TARGET" = worker ]; then
+            docker run --rm --memory=4g -e WITNESS_FILE=/opt/m3tering/fixtures/input.json "$image" /usr/local/bin/m3tering-prover execute-fixture | tee execution.log
+            key=$(jq -r .program_key release/program-build.json)
+            grep -F "Program verification key: $key" execution.log
+          else
+            docker run --rm "$image" npm test
+          fi
+      - name: Publish tested images
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r image; do
+            docker push "$image"
+            printf '%s\n' "$image" >> "$GITHUB_STEP_SUMMARY"
+          done <<< "$IMAGE_TAGS"

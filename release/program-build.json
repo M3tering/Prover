@@ -1,0 +1,12 @@
+{
+  "rollup_pr": "https://github.com/M3tering/Rollup/pull/1",
+  "prover_pr": "https://github.com/M3tering/Prover/pull/13",
+  "rollup_commit": "9c69f92507a3d46d3340c03aee56c87d9336bc62",
+  "prover_commit": "7c91cda9b03e29e3de11c83325a02df91ec34e5d",
+  "program_key": "0x00d7ccad99253ce7ee8b85917c04d23c3685645613492931c9ad82efecefe06d",
+  "elf_sha256": "1cdba7eb2eae2c6839ec69074a9053cbf0cce030cb16d60642e8122145a3fe12",
+  "cycles": 594770,
+  "pgu": 698633,
+  "solidity_tests": 22,
+  "rust_tests": 16
+}
