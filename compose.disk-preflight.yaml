@@ -1,0 +1,12 @@
+# Optional overlay for large native-execution traces on hosts with limited RAM.
+# Use with compose.yaml; the dedicated volume replaces tmpfs at /dev/shm.
+services:
+  init-data:
+    volumes:
+      - preflight-shm:/preflight-shm
+    command: [sh, -c, 'mkdir -p /data/batches /data/cache && chown -R 1000:1000 /data && chown 1000:1000 /preflight-shm && chmod 700 /preflight-shm']
+  worker:
+    volumes:
+      - preflight-shm:/dev/shm
+volumes:
+  preflight-shm:

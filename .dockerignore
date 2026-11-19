@@ -8,3 +8,4 @@ elf
 prover-output*
 *.log
 release/m3tering-prover
+backups

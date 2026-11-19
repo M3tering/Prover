@@ -54,6 +54,22 @@ Set `PROVING_ENABLED=true` to permit paid work. `PROVE_INTERVAL_SECONDS` control
 
 The host chooses a batch within its mixed fresh/reused slot gas budget, then measures storage-writing gas on the live chain using `eth_estimateGas` with a simulation-only verifier override, shrinks the batch if necessary, reserves verifier overhead and 20% headroom, checks wallet funding and guest identity, and executes locally before purchasing a proof. `MAX_PRICE_PER_PGU=auto` uses the SP1 network's quoted maximum price per PGU, with no added percentage buffer. Set a numeric value for a fixed cap, and optionally `MAX_PROOF_COST_WEI` for an absolute per-proof PROVE limit. Ethereum gas limits do not bound the price of PROVE. Network credit and Ethereum balance checks fail before purchase when insufficient.
 
+SP1's network generates the proof; the local guest execution validates the transition and estimates cycles/PGU first. There is no fixed 666-action protocol limit. `MAX_ACTIONS`, `MAX_PROVER_CYCLES` and `MAX_PROVER_PGU` are configurable admission limits, while the worker's RAM and shared-memory capacity constrain execution. Increasing an action limit alone does not provide more execution memory.
+
+For larger preflights on Linux hosts with limited RAM, `compose.disk-preflight.yaml` mounts a dedicated disk-backed Docker volume at the worker's `/dev/shm`. The kernel can reclaim file-backed trace pages under memory pressure. This trades disk space and I/O for a smaller resident trace working set; the container memory limit still applies. Enable it with these entries in your private `.env`:
+
+```dotenv
+COMPOSE_FILE=compose.yaml:compose.disk-preflight.yaml
+WORKER_MEMORY=2g
+MAX_ACTIONS=3000
+MAX_PROVER_CYCLES=500000000
+MAX_PROVER_PGU=500000000
+```
+
+Then run `./node start`. The overlay initializes the volume for the non-root worker and preserves the existing database/proof volumes. `WORKER_SHM_SIZE` controls the ordinary tmpfs setup; the disk-backed mount instead uses the Docker volume's filesystem capacity. Keep ample free space on Docker's data filesystem and monitor it alongside memory. SP1 normally unlinks trace files on exit, but interrupted executions can leave files behind; stop all workers using the volume before inspecting or clearing stale trace files. Run only one worker for a deployment. Disk-backed traces do not alter the guest, statement or SP1 gas-accounting chunk settings. Larger limits are ceilings, not a guarantee that every workload fits; fee, credit and on-chain gas checks remain active.
+
+On the 4 GB deployment host without swap, a preflight-only test of 2,680 signed actions sharing one word passed with a 2 GB memory limit and disk-backed shared memory: 277,561,712 cycles and 328,343,274 PGU. Its output matched the host transition, and trace files were removed on exit. The same workload had exceeded the former 1 GB tmpfs-worker memory limit. Results are recorded in `benchmarks/preflight-disk-2680.json`; this is a measured workload, not a universal maximum batch size. The normal host adds 10% cycle/PGU headroom before comparing reports with the configured limits.
+
 A durable marker is written **before** requesting a paid proof. The returned request ID is saved immediately; the worker automatically recovers that same request after a timeout or restart. Saved proofs are reverified and reused while their old state/keys remain current. Ethereum transactions are signed and saved before broadcasting, so recovery rebroadcasts identical bytes/hash. Only a successful, confirmed, canonical receipt marks selected messages consumed. An ambiguous paid request without a saved request ID pauses further buying; inspect the SP1 request history and recover its ID before proceeding. Stale proofs or reverted transactions also require operator review instead of automatic repurchase.
 
 ```sh

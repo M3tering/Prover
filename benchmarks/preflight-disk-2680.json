@@ -1,0 +1,20 @@
+{
+  "actions": 2680,
+  "storage_words": 1,
+  "cycles": 277561712,
+  "pgu": 328343274,
+  "program_vkey": "0x00d7ccad99253ce7ee8b85917c04d23c3685645613492931c9ad82efecefe06d",
+  "worker_memory_limit_bytes": 2147483648,
+  "shared_memory_backend": "disk-backed bind mount",
+  "host_ram_mib": 3916,
+  "host_swap_enabled": false,
+  "exit_code": 0,
+  "oom_killed": false,
+  "started_at": "2026-11-19T13:38:54.7750574Z",
+  "finished_at": "2026-11-19T13:46:34.487366494Z",
+  "trace_files_cleaned_on_exit": true,
+  "paid_proof_requested": false,
+  "worker_image": "ghcr.io/m3tering/prover@sha256:4220d6d5fa0a65a1194228a358e3157411e1101facb25879623e006f52a102e4",
+  "sp1_sdk": "6.3.1",
+  "guest_elf_sha256": "1cdba7eb2eae2c6839ec69074a9053cbf0cce030cb16d60642e8122145a3fe12"
+}
